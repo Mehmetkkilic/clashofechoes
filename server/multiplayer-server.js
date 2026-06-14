@@ -13,12 +13,15 @@ const distDir = path.resolve(serverDir, "../dist");
 const clients = new Map();
 const server = http.createServer(handleRequest);
 const wss = new WebSocketServer({ server });
+const heartbeatIntervalMs = 15000;
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".gif": "image/gif",
   ".html": "text/html; charset=utf-8",
   ".ico": "image/x-icon",
+  ".m4a": "audio/mp4",
+  ".md": "text/markdown; charset=utf-8",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".js": "text/javascript; charset=utf-8",
@@ -30,6 +33,28 @@ const mimeTypes = {
 
 server.listen(port, host, () => {
   console.log(`Clash of Echoes server running on http://${host}:${port}`);
+});
+
+const heartbeatTimer = setInterval(() => {
+  for (const [id, client] of clients) {
+    if (client.ws.readyState !== client.ws.OPEN) {
+      removeClient(id);
+      continue;
+    }
+
+    if (!client.isAlive) {
+      client.ws.terminate();
+      removeClient(id);
+      continue;
+    }
+
+    client.isAlive = false;
+    client.ws.ping();
+  }
+}, heartbeatIntervalMs);
+
+server.on("close", () => {
+  clearInterval(heartbeatTimer);
 });
 
 async function handleRequest(request, response) {
@@ -180,6 +205,13 @@ function peersFor(room, exceptId) {
     .map(([id, client]) => ({ id, state: client.state }));
 }
 
+function removeClient(id) {
+  const client = clients.get(id);
+  if (!client) return;
+  clients.delete(id);
+  broadcast(client.room, { type: "peer-left", id }, id);
+}
+
 wss.on("connection", (ws, request) => {
   const url = new URL(request.url, "ws://localhost");
   const id = crypto.randomUUID();
@@ -190,6 +222,7 @@ wss.on("connection", (ws, request) => {
     room,
     ws,
     state: null,
+    isAlive: true,
   });
 
   send(ws, {
@@ -211,6 +244,12 @@ wss.on("connection", (ws, request) => {
 
     const client = clients.get(id);
     if (!client) return;
+    client.isAlive = true;
+
+    if (message.type === "ping") {
+      send(ws, { type: "pong", now: Date.now() });
+      return;
+    }
 
     if (message.type === "state" && message.state) {
       client.state = sanitizeState(message.state);
@@ -236,9 +275,13 @@ wss.on("connection", (ws, request) => {
     }
   });
 
+  ws.on("pong", () => {
+    const client = clients.get(id);
+    if (client) client.isAlive = true;
+  });
+
   ws.on("close", () => {
-    clients.delete(id);
-    broadcast(room, { type: "peer-left", id }, id);
+    removeClient(id);
   });
 });
 
@@ -273,6 +316,7 @@ function sanitizeAttack(attack) {
       y: numberValue(attack.position?.y, 0, 20),
       z: numberValue(attack.position?.z, -60, 60),
     },
+    target: sanitizeAttackTarget(attack.target),
     direction: sanitizeDirection(attack.direction),
   };
 }
@@ -328,4 +372,13 @@ function directionValue(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(1, Math.max(-1, parsed));
+}
+
+function sanitizeAttackTarget(target) {
+  if (!target || typeof target !== "object") return null;
+  return {
+    x: numberValue(target.x, -60, 60),
+    y: numberValue(target.y, 0, 20),
+    z: numberValue(target.z, -60, 60),
+  };
 }

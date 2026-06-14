@@ -130,9 +130,33 @@ const audioState = {
   master: null,
   compressor: null,
   ambience: null,
+  sampleAmbience: null,
   noiseBuffer: null,
+  samples: new Map(),
+  sampleLoading: false,
+  sampleReady: false,
+  sampleFailures: 0,
   unlocked: false,
   unlockMessageShown: false,
+};
+
+const AUDIO_SAMPLES = {
+  ambience: { src: "/audio/ambience-castle.m4a", gain: 0.11 },
+  slash: { src: "/audio/melee-swing.m4a", gain: 0.58 },
+  hit: { src: "/audio/sword-hit.m4a", gain: 0.56 },
+  bash: { src: "/audio/sword-hit.m4a", gain: 0.72 },
+  block: { src: "/audio/sword-hit.m4a", gain: 0.48 },
+  fire: { src: "/audio/fireball.m4a", gain: 0.46, maxDuration: 1.7 },
+  meteor: { src: "/audio/fireball.m4a", gain: 0.58, maxDuration: 1.9 },
+  arrow: { src: "/audio/arrow-whoosh.m4a", gain: 0.52 },
+  "charge-arrow": { src: "/audio/magical-whoosh.m4a", gain: 0.44, maxDuration: 0.9 },
+  ice: { src: "/audio/magical-whoosh.m4a", gain: 0.38, playbackRate: 1.18, maxDuration: 0.9 },
+  witch: { src: "/audio/sonic-disruptor.m4a", gain: 0.42, maxDuration: 1.35 },
+  dash: { src: "/audio/magical-whoosh.m4a", gain: 0.44, playbackRate: 0.92, maxDuration: 0.8 },
+  trap: { src: "/audio/trap.m4a", gain: 0.5, maxDuration: 1.0 },
+  wall: { src: "/audio/magical-whoosh.m4a", gain: 0.42, playbackRate: 0.8, maxDuration: 1.0 },
+  zone: { src: "/audio/darkmagic.m4a", gain: 0.28, maxDuration: 1.8 },
+  ultimate: { src: "/audio/darkmagic.m4a", gain: 0.42, maxDuration: 2.7 },
 };
 
 const player = {
@@ -169,7 +193,10 @@ const multiplayer = {
   serverUrl: null,
   status: "offline",
   lastSentAt: 0,
+  lastMessageAt: 0,
   reconnectTimer: null,
+  heartbeatTimer: null,
+  reconnectDelay: 1500,
 };
 
 const lightingPresets = {
@@ -272,6 +299,7 @@ function exposeDebugState() {
         controlsLocked,
         audioUnlocked: audioState.unlocked,
         audioState: audioState.ctx?.state ?? "unavailable",
+        audioSamples: audioState.samples.size,
         lightingMode: lightingState.mode,
         lightLevel: lightingState.level,
         multiplayerStatus: multiplayer.status,
@@ -347,6 +375,7 @@ function finishAudioUnlock() {
   audioState.unlocked = audioState.ctx.state === "running";
   if (audioState.unlocked) {
     startAmbience();
+    loadAudioSamples();
     if (!audioState.unlockMessageShown) {
       audioState.unlockMessageShown = true;
       playSound("ready");
@@ -382,12 +411,63 @@ function startAmbience() {
   audioState.ambience = { gain, low, high, filter };
 }
 
+async function loadAudioSamples() {
+  if (!audioState.ctx || audioState.sampleLoading || audioState.sampleReady) return;
+  audioState.sampleLoading = true;
+
+  const decodedBySource = new Map();
+  const entries = Object.entries(AUDIO_SAMPLES);
+
+  await Promise.all(
+    entries.map(async ([name, settings]) => {
+      try {
+        if (!decodedBySource.has(settings.src)) {
+          decodedBySource.set(
+            settings.src,
+            fetch(settings.src)
+              .then((response) => {
+                if (!response.ok) throw new Error(`Audio load failed: ${settings.src}`);
+                return response.arrayBuffer();
+              })
+              .then((data) => audioState.ctx.decodeAudioData(data))
+          );
+        }
+
+        audioState.samples.set(name, await decodedBySource.get(settings.src));
+      } catch {
+        audioState.sampleFailures += 1;
+      }
+    })
+  );
+
+  audioState.sampleReady = audioState.samples.size > 0;
+  audioState.sampleLoading = false;
+  startSampleAmbience();
+}
+
+function startSampleAmbience() {
+  if (!canPlayAudio() || audioState.sampleAmbience) return;
+  const buffer = audioState.samples.get("ambience");
+  if (!buffer) return;
+
+  const source = audioState.ctx.createBufferSource();
+  const gain = audioState.ctx.createGain();
+  source.buffer = buffer;
+  source.loop = true;
+  gain.gain.value = AUDIO_SAMPLES.ambience.gain;
+  source.connect(gain);
+  gain.connect(audioState.master);
+  source.start();
+  audioState.sampleAmbience = { source, gain };
+}
+
 function canPlayAudio() {
   return audioState.unlocked && audioState.ctx?.state === "running" && audioState.master;
 }
 
 function playSound(name, intensity = 1) {
   if (!canPlayAudio()) return;
+  if (playSample(name, intensity)) return;
 
   switch (name) {
     case "ready":
@@ -486,6 +566,30 @@ function playSound(name, intensity = 1) {
     default:
       break;
   }
+}
+
+function playSample(name, intensity = 1) {
+  const settings = AUDIO_SAMPLES[name];
+  const buffer = audioState.samples.get(name);
+  if (!settings || !buffer) return false;
+
+  const source = audioState.ctx.createBufferSource();
+  const gain = audioState.ctx.createGain();
+  const start = audioState.ctx.currentTime;
+  const jitter = 1 + (Math.random() - 0.5) * 0.05;
+
+  source.buffer = buffer;
+  source.playbackRate.value = (settings.playbackRate ?? 1) * jitter;
+  gain.gain.value = (settings.gain ?? 0.4) * intensity;
+  source.connect(gain);
+  gain.connect(audioState.master);
+  source.start(start);
+
+  if (settings.maxDuration && settings.maxDuration < buffer.duration) {
+    source.stop(start + settings.maxDuration);
+  }
+
+  return true;
 }
 
 function tone(frequency, duration, options = {}) {
@@ -619,13 +723,16 @@ function connectMultiplayer() {
   url.searchParams.set("room", multiplayer.room);
   const socket = new WebSocket(url);
   multiplayer.socket = socket;
+  multiplayer.lastMessageAt = Date.now();
 
   socket.addEventListener("open", () => {
     setMultiplayerStatus("connecting", "MP Joining", multiplayer.room);
+    startMultiplayerHeartbeat(socket);
     sendMultiplayerState(true);
   });
 
   socket.addEventListener("message", (event) => {
+    multiplayer.lastMessageAt = Date.now();
     let message;
     try {
       message = JSON.parse(event.data);
@@ -636,6 +743,7 @@ function connectMultiplayer() {
     if (message.type === "welcome") {
       multiplayer.id = message.id;
       multiplayer.room = message.room || multiplayer.room;
+      multiplayer.reconnectDelay = 1500;
       setMultiplayerStatus("online", "MP Online", `room ${multiplayer.room}`);
       for (const peer of message.peers || []) {
         updateRemotePlayer(peer.id, peer.state);
@@ -659,6 +767,10 @@ function connectMultiplayer() {
       handlePeerDeath(message.id, message.death);
     }
 
+    if (message.type === "pong") {
+      return;
+    }
+
     if (message.type === "peer-left") {
       removeRemotePlayer(message.id);
     }
@@ -666,16 +778,52 @@ function connectMultiplayer() {
 
   socket.addEventListener("close", () => {
     if (multiplayer.socket !== socket) return;
+    stopMultiplayerHeartbeat();
     multiplayer.socket = null;
     multiplayer.id = null;
     clearRemotePlayers();
     setMultiplayerStatus("offline", "MP Offline", "retrying");
-    multiplayer.reconnectTimer = setTimeout(connectMultiplayer, 2500);
+    scheduleMultiplayerReconnect();
   });
 
   socket.addEventListener("error", () => {
+    if (multiplayer.socket !== socket) return;
     setMultiplayerStatus("offline", "MP Offline", "server not found");
+    socket.close();
   });
+}
+
+function startMultiplayerHeartbeat(socket) {
+  stopMultiplayerHeartbeat();
+  multiplayer.heartbeatTimer = setInterval(() => {
+    if (multiplayer.socket !== socket) {
+      stopMultiplayerHeartbeat();
+      return;
+    }
+
+    if (socket.readyState !== WebSocket.OPEN) return;
+
+    const now = Date.now();
+    if (now - multiplayer.lastMessageAt > 25000) {
+      socket.close();
+      return;
+    }
+
+    socket.send(JSON.stringify({ type: "ping", t: now }));
+  }, 8000);
+}
+
+function stopMultiplayerHeartbeat() {
+  if (!multiplayer.heartbeatTimer) return;
+  clearInterval(multiplayer.heartbeatTimer);
+  multiplayer.heartbeatTimer = null;
+}
+
+function scheduleMultiplayerReconnect() {
+  clearTimeout(multiplayer.reconnectTimer);
+  const delay = multiplayer.reconnectDelay;
+  multiplayer.reconnectDelay = Math.min(9000, Math.round(multiplayer.reconnectDelay * 1.45));
+  multiplayer.reconnectTimer = setTimeout(connectMultiplayer, delay);
 }
 
 function setMultiplayerStatus(status, label, detail) {
@@ -722,8 +870,9 @@ function sendMultiplayerMessage(message) {
   return true;
 }
 
-function sendMultiplayerAttack(slot, label, color) {
-  const direction = getCameraForward();
+function sendMultiplayerAttack(slot, label, color, options = {}) {
+  const direction = options.direction ?? getCameraForward();
+  const target = options.target ?? null;
   sendMultiplayerMessage({
     type: "attack",
     attack: {
@@ -737,6 +886,13 @@ function sendMultiplayerAttack(slot, label, color) {
         y: player.position.y,
         z: player.position.z,
       },
+      target: target
+        ? {
+            x: target.x,
+            y: target.y,
+            z: target.z,
+          }
+        : null,
       direction: {
         x: direction.x,
         y: direction.y,
@@ -772,6 +928,7 @@ function animateRemoteAttack(id, attack = {}) {
   if (!remote) return;
   remote.attackPulse = 1;
   spawnRemoteAttackEffect(remote, attack);
+  playSound(soundForAttack(attack.label));
 }
 
 function spawnRemoteAttackEffect(remote, attack) {
@@ -780,9 +937,26 @@ function spawnRemoteAttackEffect(remote, attack) {
   const origin = attack.position
     ? new THREE.Vector3(attack.position.x, attack.position.y, attack.position.z)
     : remote.group.position.clone().add(new THREE.Vector3(0, 1.72, 0));
+  const target = getAttackTarget(attack);
+  const direction = getAttackDirection(attack);
 
-  if (label.includes("Arrow") || label.includes("Fire") || label.includes("Ice") || label.includes("Wave")) {
-    spawnRemoteProjectile(attack, origin, color, label);
+  if (label.includes("Slash")) {
+    makeDirectionalCone(remote.group.position, remote.group.rotation.y, 3.2, color, 0.28);
+    return;
+  }
+
+  if (label.includes("Shield Bash")) {
+    makeDirectionalCone(remote.group.position, remote.group.rotation.y, 4.0, color, 0.34);
+    return;
+  }
+
+  if (label.includes("Scream")) {
+    makeDirectionalCone(remote.group.position, remote.group.rotation.y, label.includes("Banshee") ? 15 : 8.5, color, 0.65);
+    return;
+  }
+
+  if (label.includes("Sprint Charge") || label.includes("Roll")) {
+    makeGroundRing(remote.group.position, label.includes("Sprint") ? 2.8 : 2.1, color, 0.42);
     return;
   }
 
@@ -791,7 +965,60 @@ function spawnRemoteAttackEffect(remote, attack) {
     return;
   }
 
+  if (label.includes("Fire Field")) {
+    makeRemoteZone(target || projectAttackTarget(origin, direction, 18), 4.3, color, 4.2);
+    return;
+  }
+
+  if (label.includes("Ice Wall")) {
+    makeRemoteWall(target || projectAttackTarget(origin, direction, 9), direction, color, 5.8);
+    return;
+  }
+
+  if (label.includes("Meteor Shower")) {
+    const center = target || projectAttackTarget(origin, direction, 18);
+    makeRemoteZone(center, 7.5, color, 1.2);
+    for (let i = 0; i < 9; i++) {
+      setTimeout(() => spawnRemoteMeteor(center.clone().add(randomFlatOffset(11)), color), i * 170);
+    }
+    return;
+  }
+
+  if (label.includes("Trap")) {
+    makeRemoteZone(target || projectAttackTarget(origin, direction, 6), 2.2, color, 5.0);
+    return;
+  }
+
+  if (label.includes("Arrow Rain")) {
+    const center = target || projectAttackTarget(origin, direction, 17);
+    makeRemoteZone(center, 7.2, color, 1.0);
+    for (let i = 0; i < 14; i++) {
+      setTimeout(() => spawnRemoteFallingArrow(center.clone().add(randomFlatOffset(12)), color), i * 80);
+    }
+    return;
+  }
+
+  if (label.includes("Silence")) {
+    makeRemoteZone(target || projectAttackTarget(origin, direction, 13), 4.6, color, 3.5);
+    return;
+  }
+
+  if (isProjectileAttack(label)) {
+    spawnRemoteProjectile(attack, origin, color, label);
+    return;
+  }
+
   makeGroundRing(remote.group.position, 2.4, color, 0.28);
+}
+
+function isProjectileAttack(label) {
+  return (
+    label === "Arrow" ||
+    label.includes("Charged Arrow") ||
+    label.includes("Fireball") ||
+    label.includes("Ice Bolt") ||
+    label.includes("Sound Wave")
+  );
 }
 
 function spawnRemoteProjectile(attack, origin, color, label) {
@@ -841,6 +1068,32 @@ function getAttackDirection(attack) {
   }
 
   return new THREE.Vector3(0, 0, -1).applyAxisAngle(upAxis, attack.yaw ?? 0).normalize();
+}
+
+function getAttackTarget(attack) {
+  if (!attack.target) return null;
+  return new THREE.Vector3(attack.target.x, attack.target.y, attack.target.z);
+}
+
+function projectAttackTarget(origin, direction, distance) {
+  const flat = direction.clone();
+  flat.y = 0;
+  if (flat.lengthSq() <= 0.01) flat.set(0, 0, -1).applyAxisAngle(upAxis, yaw);
+  return new THREE.Vector3(origin.x, 0, origin.z).add(flat.normalize().multiplyScalar(distance));
+}
+
+function soundForAttack(label = "") {
+  if (label.includes("Arrow")) return "arrow";
+  if (label.includes("Fire") || label.includes("Meteor")) return "fire";
+  if (label.includes("Ice")) return "ice";
+  if (label.includes("Slash")) return "slash";
+  if (label.includes("Bash")) return "bash";
+  if (label.includes("Charge") || label.includes("Roll")) return "dash";
+  if (label.includes("Trap")) return "trap";
+  if (label.includes("Wall")) return "wall";
+  if (label.includes("Whirlwind") || label.includes("Rain") || label.includes("Banshee")) return "ultimate";
+  if (label.includes("Silence") || label.includes("Fear") || label.includes("Scream") || label.includes("Wave")) return "witch";
+  return "zone";
 }
 
 function applyPeerDamage(attackerId, hit = {}) {
@@ -1572,14 +1825,12 @@ function bindEvents() {
 
   canvas.addEventListener("click", () => {
     unlockAudio();
-    if (document.pointerLockElement !== canvas) {
-      canvas.requestPointerLock();
-    }
+    requestArenaPointerLock();
   });
 
   ui.lockPanel.addEventListener("click", () => {
     unlockAudio();
-    canvas.requestPointerLock();
+    requestArenaPointerLock();
   });
 
   ui.lightingButtons.forEach((button) => {
@@ -1703,6 +1954,12 @@ function bindEvents() {
       canvas.focus();
     });
   });
+}
+
+function requestArenaPointerLock() {
+  if (document.pointerLockElement === canvas) return;
+  const request = canvas.requestPointerLock?.();
+  if (request?.catch) request.catch(() => {});
 }
 
 function selectClass(classId) {
@@ -2262,8 +2519,8 @@ function usePriestAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.5;
     playSound("zone");
-    sendMultiplayerAttack("q", "Fire Field", 0xf26f45);
     const point = getAimGroundPoint(18);
+    sendMultiplayerAttack("q", "Fire Field", 0xf26f45, { target: point });
     const mesh = makeGroundRing(point, 4.3, 0xf26f45, 4.2, true);
     timedZones.push({
       mesh,
@@ -2282,9 +2539,9 @@ function usePriestAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 8.0;
     playSound("wall");
-    sendMultiplayerAttack("e", "Ice Wall", 0x95d5ee);
     const point = getAimGroundPoint(9);
     const forward = getFlatForward();
+    sendMultiplayerAttack("e", "Ice Wall", 0x95d5ee, { target: point, direction: forward });
     const wall = new THREE.Mesh(
       new THREE.BoxGeometry(8.5, 3.2, 0.5),
       new THREE.MeshLambertMaterial({
@@ -2306,8 +2563,8 @@ function usePriestAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 24;
     playSound("ultimate");
-    sendMultiplayerAttack("r", "Meteor Shower", 0xf26f45);
     const center = getAimGroundPoint(18);
+    sendMultiplayerAttack("r", "Meteor Shower", 0xf26f45, { target: center });
     for (let i = 0; i < 9; i++) {
       setTimeout(() => {
         const offset = new THREE.Vector3((Math.random() - 0.5) * 11, 0, (Math.random() - 0.5) * 11);
@@ -2337,8 +2594,8 @@ function useRangerAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 6.6;
     playSound("trap");
-    sendMultiplayerAttack("e", "Trap", 0x7fcf79);
     const point = getAimGroundPoint(6);
+    sendMultiplayerAttack("e", "Trap", 0x7fcf79, { target: point });
     const trap = makeGroundRing(point, 2.2, 0x7fcf79, 8, true);
     timedZones.push({
       mesh: trap,
@@ -2376,8 +2633,8 @@ function useRangerAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 21;
     playSound("ultimate");
-    sendMultiplayerAttack("r", "Arrow Rain", 0x7fcf79);
     const center = getAimGroundPoint(17);
+    sendMultiplayerAttack("r", "Arrow Rain", 0x7fcf79, { target: center });
     for (let i = 0; i < 14; i++) {
       setTimeout(() => {
         const offset = new THREE.Vector3((Math.random() - 0.5) * 12, 0, (Math.random() - 0.5) * 12);
@@ -2394,8 +2651,8 @@ function useWitchAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.4;
     playSound("zone");
-    sendMultiplayerAttack("q", "Silence", 0xb77ce8);
     const point = getAimGroundPoint(13);
+    sendMultiplayerAttack("q", "Silence", 0xb77ce8, { target: point });
     const mesh = makeGroundRing(point, 4.6, 0xb77ce8, 3.5, true);
     timedZones.push({
       mesh,
@@ -2783,8 +3040,12 @@ function makeGroundRing(position, radius, color, life, persistent = false) {
 }
 
 function makeForwardCone(range, color, life) {
-  const forward = getFlatForward();
-  const position = player.position.clone().add(forward.multiplyScalar(range * 0.48));
+  makeDirectionalCone(player.position, yaw, range, color, life);
+}
+
+function makeDirectionalCone(origin, yawValue, range, color, life) {
+  const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(upAxis, yawValue).normalize();
+  const position = origin.clone().add(forward.multiplyScalar(range * 0.48));
   position.y = 0.08;
   const cone = new THREE.Mesh(
     new THREE.ConeGeometry(range * 0.45, range, 24, 1, true),
@@ -2798,7 +3059,7 @@ function makeForwardCone(range, color, life) {
   );
   cone.position.copy(position);
   cone.rotation.x = Math.PI / 2;
-  cone.rotation.z = -yaw;
+  cone.rotation.z = -yawValue;
   scene.add(cone);
   effects.push({
     mesh: cone,
@@ -2809,6 +3070,87 @@ function makeForwardCone(range, color, life) {
       effect.mesh.scale.setScalar(1 + progress * 0.18);
     },
   });
+}
+
+function makeRemoteZone(position, radius, color, life) {
+  const zone = makeGroundRing(position, radius, color, life, true);
+  zone.material.opacity = 0.36;
+  effects.push({
+    mesh: zone,
+    life,
+    maxLife: life,
+    update(effect, progress, dt) {
+      effect.mesh.rotation.z += dt * 0.2;
+      effect.mesh.material.opacity = Math.max(0, 0.36 * (1 - progress * 0.72));
+    },
+  });
+}
+
+function makeRemoteWall(position, direction, color, life) {
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(8.5, 3.2, 0.5),
+    new THREE.MeshLambertMaterial({
+      color,
+      transparent: true,
+      opacity: 0.58,
+      flatShading: true,
+    })
+  );
+  const flat = direction.clone();
+  flat.y = 0;
+  if (flat.lengthSq() <= 0.01) flat.set(0, 0, -1);
+  wall.position.set(position.x, 1.6, position.z);
+  wall.rotation.y = Math.atan2(flat.x, flat.z) + Math.PI / 2;
+  wall.castShadow = true;
+  scene.add(wall);
+  effects.push({
+    mesh: wall,
+    life,
+    maxLife: life,
+    update(effect, progress) {
+      effect.mesh.material.opacity = Math.max(0, 0.58 * (1 - progress * 0.85));
+    },
+  });
+}
+
+function spawnRemoteMeteor(point, color) {
+  const mesh = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.65, 0),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+  );
+  mesh.position.copy(point);
+  mesh.position.y = 18 + Math.random() * 8;
+  scene.add(mesh);
+  effects.push({
+    mesh,
+    life: 1.5,
+    maxLife: 1.5,
+    update(effect, progress, dt) {
+      effect.mesh.position.y -= 20 * dt;
+      effect.mesh.rotation.x += 6 * dt;
+      effect.mesh.material.opacity = Math.max(0, 0.95 * (1 - Math.max(0, progress - 0.65) / 0.35));
+    },
+  });
+}
+
+function spawnRemoteFallingArrow(point, color) {
+  const mesh = createProjectileMesh("arrow", color, 0.35);
+  mesh.position.copy(point);
+  mesh.position.y = 16 + Math.random() * 6;
+  scene.add(mesh);
+  effects.push({
+    mesh,
+    life: 1.2,
+    maxLife: 1.2,
+    update(effect, progress, dt) {
+      effect.mesh.position.y -= 26 * dt;
+      setObjectOpacity(effect.mesh, Math.max(0, 0.94 * (1 - Math.max(0, progress - 0.7) / 0.3)));
+    },
+  });
+}
+
+function randomFlatOffset(size) {
+  return new THREE.Vector3((Math.random() - 0.5) * size, 0, (Math.random() - 0.5) * size);
 }
 
 function spawnHitBurst(position, color) {
@@ -2925,6 +3267,7 @@ function addFeed(message, type) {
 function updateHud() {
   ui.app.dataset.audio = audioState.ctx?.state ?? "unavailable";
   ui.app.dataset.audioUnlocked = String(audioState.unlocked);
+  ui.app.dataset.audioSamples = String(audioState.samples.size);
   ui.app.dataset.lightMode = lightingState.mode;
   ui.app.dataset.lightLevel = String(Math.round(lightingState.level * 100));
   ui.app.dataset.multiplayerStatus = multiplayer.status;
