@@ -647,6 +647,18 @@ function connectMultiplayer() {
       updateRemotePlayer(message.id, message.state);
     }
 
+    if (message.type === "peer-attack") {
+      animateRemoteAttack(message.id, message.attack);
+    }
+
+    if (message.type === "damage") {
+      applyPeerDamage(message.attackerId, message.hit);
+    }
+
+    if (message.type === "peer-death") {
+      handlePeerDeath(message.id, message.death);
+    }
+
     if (message.type === "peer-left") {
       removeRemotePlayer(message.id);
     }
@@ -672,6 +684,7 @@ function setMultiplayerStatus(status, label, detail) {
   ui.mpRoom.textContent = detail;
   ui.mpHud.classList.toggle("online", status === "online");
   ui.mpHud.classList.toggle("connecting", status === "connecting");
+  syncEnemyVisibility();
 }
 
 function sendMultiplayerState(force = false) {
@@ -689,6 +702,9 @@ function sendMultiplayerState(force = false) {
         maxHp: player.maxHp,
         score: player.score,
         deaths: player.deaths,
+        shield: player.shield,
+        chargingShot: player.chargingShot,
+        dead: player.deadTimer > 0,
         yaw,
         position: {
           x: player.position.x,
@@ -698,6 +714,153 @@ function sendMultiplayerState(force = false) {
       },
     })
   );
+}
+
+function sendMultiplayerMessage(message) {
+  if (!multiplayer.socket || multiplayer.socket.readyState !== WebSocket.OPEN) return false;
+  multiplayer.socket.send(JSON.stringify(message));
+  return true;
+}
+
+function sendMultiplayerAttack(slot, label, color) {
+  sendMultiplayerMessage({
+    type: "attack",
+    attack: {
+      classId: player.classId,
+      slot,
+      label,
+      color,
+      yaw,
+      position: {
+        x: player.position.x,
+        y: player.position.y,
+        z: player.position.z,
+      },
+    },
+  });
+}
+
+function sendMultiplayerHit(remote, amount, label, color, extra = {}) {
+  return sendMultiplayerMessage({
+    type: "hit",
+    targetId: remote.id,
+    amount,
+    label,
+    color,
+    knock: extra.knock ?? 0,
+  });
+}
+
+function sendMultiplayerDeath(killerId, label) {
+  sendMultiplayerMessage({
+    type: "death",
+    death: {
+      killerId,
+      label,
+    },
+  });
+}
+
+function animateRemoteAttack(id, attack = {}) {
+  const remote = remotePlayers.get(id);
+  if (!remote) return;
+  remote.attackPulse = 1;
+  spawnRemoteAttackEffect(remote, attack);
+}
+
+function spawnRemoteAttackEffect(remote, attack) {
+  const color = attack.color ?? classColor(remote.classId);
+  const label = attack.label || "Attack";
+  const origin = remote.group.position.clone();
+  origin.y += 1.22;
+
+  if (label.includes("Arrow") || label.includes("Fire") || label.includes("Ice") || label.includes("Wave")) {
+    const forward = new THREE.Vector3(Math.sin(remote.group.rotation.y), 0, Math.cos(remote.group.rotation.y));
+    const mesh = createProjectileMesh(label.includes("Arrow") ? "arrow" : label.includes("Ice") ? "ice" : label.includes("Wave") ? "wave" : "sphere", color, 0.34);
+    mesh.position.copy(origin).add(forward.clone().multiplyScalar(0.8));
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), forward.clone().normalize());
+    scene.add(mesh);
+    effects.push({
+      mesh,
+      life: 0.36,
+      maxLife: 0.36,
+      update(effect, progress, dt) {
+        effect.mesh.position.addScaledVector(forward, dt * 24);
+        setObjectOpacity(effect.mesh, Math.max(0, 0.9 * (1 - progress)));
+      },
+    });
+    return;
+  }
+
+  if (label.includes("Whirlwind") || label.includes("Fear")) {
+    makeGroundRing(remote.group.position, label.includes("Whirlwind") ? 6.3 : 7.4, color, 0.55);
+    return;
+  }
+
+  makeGroundRing(remote.group.position, 2.4, color, 0.28);
+}
+
+function applyPeerDamage(attackerId, hit = {}) {
+  if (!attackerId || player.deadTimer > 0 || player.invulnerable > 0) return;
+
+  const attacker = remotePlayers.get(attackerId);
+  let finalDamage = clamp(Number(hit.amount) || 0, 0, 200);
+  if (finalDamage <= 0) return;
+
+  if (player.shield && attacker && isSourceInFront(attacker)) {
+    finalDamage *= 0.25;
+    playSound("block");
+    addFeed("Shield absorbed player hit", "Block");
+  } else {
+    playSound("hurt");
+  }
+
+  player.hp = Math.max(0, player.hp - finalDamage);
+  player.invulnerable = 0.18;
+  ui.vignette.classList.add("active");
+  lastHitFlash = 0.14;
+
+  if (attacker) {
+    const impact = player.position.clone().add(new THREE.Vector3(0, -0.45, 0));
+    spawnHitBurst(impact, hit.color ?? classColor(attacker.classId));
+    const knockDir = player.position.clone().sub(attacker.group.position);
+    knockDir.y = 0;
+    if ((hit.knock ?? 0) > 0 && knockDir.lengthSq() > 0.01) {
+      player.position.addScaledVector(knockDir.normalize(), Math.min(1.6, hit.knock * 0.06));
+    }
+  }
+
+  addFeed(`${hit.label || "Hit"} dealt ${Math.round(finalDamage)}`, "Damage");
+
+  if (player.hp <= 0) {
+    player.deaths += 1;
+    player.deadTimer = 2;
+    player.hp = 0;
+    player.shield = false;
+    player.chargingShot = false;
+    player.chargeRush = 0;
+    playSound("death");
+    addFeed("Respawning", "Defeated");
+    sendMultiplayerDeath(attackerId, hit.label || "Defeated");
+  }
+
+  sendMultiplayerState(true);
+}
+
+function handlePeerDeath(victimId, death = {}) {
+  if (!victimId) return;
+
+  if (death.killerId === multiplayer.id) {
+    player.score += 1;
+    playSound("kill");
+    addFeed("Player down", death.label || "Elimination");
+    sendMultiplayerState(true);
+    return;
+  }
+
+  if (remotePlayers.has(victimId)) {
+    addFeed("Player down", death.label || "Elimination");
+  }
 }
 
 function clearRemotePlayers() {
@@ -1217,6 +1380,9 @@ function createRemotePlayer(id, state) {
   marker.rotation.x = Math.PI / 2;
   group.add(marker);
 
+  const weapon = createRemoteWeapon(state.classId, color);
+  group.add(weapon);
+
   const barGroup = new THREE.Group();
   barGroup.position.y = 2.48;
   const back = new THREE.Mesh(
@@ -1237,9 +1403,12 @@ function createRemotePlayer(id, state) {
     id,
     group,
     body,
+    weapon,
+    classId: state.classId,
     healthFill: fill,
     target: new THREE.Vector3(),
     state,
+    attackPulse: 0,
   };
 }
 
@@ -1254,18 +1423,92 @@ function updateRemotePlayer(id, state) {
 
   remote.state = state;
   remote.target.set(state.position.x, state.position.y - 1.72, state.position.z);
+  if (remote.classId !== state.classId) {
+    remote.group.remove(remote.weapon);
+    remote.weapon = createRemoteWeapon(state.classId, classColor(state.classId));
+    remote.group.add(remote.weapon);
+    remote.classId = state.classId;
+  }
+
   remote.body.material.color.setHex(classColor(state.classId));
   remote.group.rotation.y = state.yaw ?? 0;
+  remote.group.visible = !state.dead && (state.hp ?? 0) > 0;
+  remote.weapon.visible = remote.group.visible;
+  remote.weapon.position.z = state.shield ? -0.18 : 0;
+  remote.weapon.rotation.x = state.chargingShot ? -0.35 : 0;
   const hpScale = clamp((state.hp ?? 0) / Math.max(1, state.maxHp ?? 1), 0, 1);
   remote.healthFill.scale.x = hpScale;
   remote.healthFill.position.x = -0.55 * (1 - hpScale);
 }
 
-function updateRemotePlayers() {
+function updateRemotePlayers(dt) {
   for (const remote of remotePlayers.values()) {
     remote.group.position.lerp(remote.target, 0.22);
+    if (remote.attackPulse > 0) {
+      remote.attackPulse = Math.max(0, remote.attackPulse - dt * 4.8);
+      const swing = Math.sin(remote.attackPulse * Math.PI);
+      remote.weapon.rotation.z = -swing * 0.68;
+      remote.weapon.position.x = swing * 0.12;
+    } else {
+      remote.weapon.rotation.z *= Math.pow(0.02, dt);
+      remote.weapon.position.x *= Math.pow(0.02, dt);
+    }
     remote.healthFill.parent.quaternion.copy(camera.quaternion);
   }
+}
+
+function createRemoteWeapon(classId, color) {
+  const weapon = new THREE.Group();
+  weapon.position.set(0.58, 1.16, -0.06);
+
+  const handMat = new THREE.MeshLambertMaterial({ color: 0xc6bda9, flatShading: true });
+  const accentMat = new THREE.MeshBasicMaterial({ color });
+  const darkMat = new THREE.MeshLambertMaterial({ color: 0x252b2a, flatShading: true });
+
+  const hand = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), handMat);
+  hand.castShadow = true;
+  weapon.add(hand);
+
+  if (classId === "fighter") {
+    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.85, 0.1), darkMat);
+    sword.position.set(0.12, 0.34, 0);
+    sword.rotation.z = -0.2;
+    sword.castShadow = true;
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.68, 0.12), accentMat);
+    shield.position.set(-0.3, 0.2, 0.08);
+    shield.castShadow = true;
+    weapon.add(sword, shield);
+  } else if (classId === "ranger") {
+    const bow = new THREE.Mesh(new THREE.TorusGeometry(0.38, 0.035, 6, 18, Math.PI), accentMat);
+    bow.rotation.z = Math.PI / 2;
+    bow.position.set(0.08, 0.22, 0);
+    const arrow = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.62, 0.05), darkMat);
+    arrow.position.set(0.14, 0.18, -0.06);
+    weapon.add(bow, arrow);
+  } else if (classId === "priest") {
+    const staff = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, 0.08), darkMat);
+    staff.position.set(0.12, 0.34, 0);
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), accentMat);
+    crystal.position.set(0.12, 0.86, 0);
+    weapon.add(staff, crystal);
+  } else {
+    const focus = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.035, 6, 18), accentMat);
+    focus.position.set(0.14, 0.28, 0);
+    focus.rotation.x = Math.PI / 2;
+    const shard = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 0), accentMat);
+    shard.position.set(0.14, 0.28, 0);
+    weapon.add(focus, shard);
+  }
+
+  return weapon;
+}
+
+function setObjectOpacity(object, opacity) {
+  object.traverse((child) => {
+    if (!child.material || typeof child.material.opacity !== "number") return;
+    child.material.transparent = true;
+    child.material.opacity = opacity;
+  });
 }
 
 function removeRemotePlayer(id) {
@@ -1477,7 +1720,7 @@ function update(dt) {
   updateZones(dt);
   updateEffects(dt);
   updateTorchLights();
-  updateRemotePlayers();
+  updateRemotePlayers(dt);
   sendMultiplayerState();
   updateFloatingMessages(dt);
   updateHud();
@@ -1605,6 +1848,20 @@ function updateProjectiles(dt) {
           break;
         }
       }
+
+      if (!hit) {
+        for (const remote of remotePlayers.values()) {
+          if (!isRemoteAlive(remote)) continue;
+          const distance = horizontalDistance(p.mesh.position, remote.group.position);
+          const vertical = Math.abs(p.mesh.position.y - (remote.group.position.y + 1.2));
+          if (distance < 0.74 + p.radius && vertical < 1.8) {
+            hitRemotePlayer(remote, p.damage, p.label, p.color, p.extra);
+            hit = true;
+            if (p.aoe > 0) damageArea(p.mesh.position, p.aoe, p.splashDamage ?? p.damage, p.label, p.color, p.extra);
+            break;
+          }
+        }
+      }
     }
 
     if (groundHit && p.aoe > 0) {
@@ -1621,6 +1878,11 @@ function updateProjectiles(dt) {
 }
 
 function updateEnemies(dt) {
+  if (isMultiplayerActive()) {
+    syncEnemyVisibility();
+    return;
+  }
+
   for (const enemy of enemies) {
     if (!enemy.alive) {
       if (controlsLocked) {
@@ -1731,6 +1993,17 @@ function updateZones(dt) {
   }
 }
 
+function isMultiplayerActive() {
+  return multiplayer.status === "online" || multiplayer.status === "connecting";
+}
+
+function syncEnemyVisibility() {
+  const enabled = !isMultiplayerActive();
+  for (const enemy of enemies) {
+    enemy.group.visible = enabled && enemy.alive;
+  }
+}
+
 function updateEffects(dt) {
   for (let i = effects.length - 1; i >= 0; i--) {
     const effect = effects[i];
@@ -1765,6 +2038,7 @@ function usePrimary() {
   if (classId === "fighter") {
     cooldowns.primary = 0.46;
     playSound("slash");
+    sendMultiplayerAttack("primary", "Slash", 0xe0a34f);
     swingWeapon(0.38);
     meleeCone({
       range: 3.2,
@@ -1776,6 +2050,7 @@ function usePrimary() {
   } else if (classId === "priest") {
     cooldowns.primary = 0.72;
     playSound("fire");
+    sendMultiplayerAttack("primary", "Fireball", 0xf26f45);
     spawnProjectile({
       label: "Fireball",
       color: 0xf26f45,
@@ -1791,6 +2066,7 @@ function usePrimary() {
   } else if (classId === "ranger") {
     cooldowns.primary = 0.55;
     playSound("arrow");
+    sendMultiplayerAttack("primary", "Arrow", 0x7fcf79);
     spawnProjectile({
       label: "Arrow",
       color: 0x7fcf79,
@@ -1803,6 +2079,7 @@ function usePrimary() {
   } else {
     cooldowns.primary = 0.62;
     playSound("witch");
+    sendMultiplayerAttack("primary", "Sound Wave", 0xb77ce8);
     spawnProjectile({
       label: "Sound Wave",
       color: 0xb77ce8,
@@ -1821,6 +2098,7 @@ function useSecondaryDown() {
   if (player.classId === "fighter") {
     player.shield = true;
     playSound("shield-up");
+    sendMultiplayerState(true);
     return;
   }
 
@@ -1829,6 +2107,7 @@ function useSecondaryDown() {
     player.chargingShot = true;
     player.chargeStartedAt = performance.now();
     playSound("charge-arrow");
+    sendMultiplayerState(true);
     return;
   }
 
@@ -1837,6 +2116,7 @@ function useSecondaryDown() {
   if (player.classId === "priest") {
     cooldowns.secondary = 1.0;
     playSound("ice");
+    sendMultiplayerAttack("secondary", "Ice Bolt", 0x95d5ee);
     spawnProjectile({
       label: "Ice Bolt",
       color: 0x95d5ee,
@@ -1850,6 +2130,7 @@ function useSecondaryDown() {
   } else if (player.classId === "witch") {
     cooldowns.secondary = 1.2;
     playSound("witch");
+    sendMultiplayerAttack("secondary", "Scream", 0xb77ce8);
     meleeCone({
       range: 8.5,
       angle: 0.82,
@@ -1866,13 +2147,16 @@ function useSecondaryUp() {
   if (player.classId === "fighter") {
     player.shield = false;
     playSound("shield-down");
+    sendMultiplayerState(true);
   }
 
   if (player.classId === "ranger" && player.chargingShot) {
     player.chargingShot = false;
     cooldowns.secondary = 1.15;
     playSound("arrow");
+    sendMultiplayerState(true);
     const charge = clamp((performance.now() - player.chargeStartedAt) / 1150, 0.25, 1);
+    sendMultiplayerAttack("secondary", "Charged Arrow", 0xd7f6a2);
     spawnProjectile({
       label: "Charged Arrow",
       color: 0xd7f6a2,
@@ -1900,6 +2184,7 @@ function useFighterAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 4.8;
     playSound("bash");
+    sendMultiplayerAttack("q", "Shield Bash", 0xe0a34f);
     meleeCone({
       range: 4.0,
       angle: 0.88,
@@ -1914,6 +2199,7 @@ function useFighterAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 7.0;
     playSound("dash");
+    sendMultiplayerAttack("e", "Sprint Charge", 0xe0a34f);
     player.chargeRush = 0.72;
     player.chargeHits.clear();
     makeGroundRing(player.position, 2.8, 0xe0a34f, 0.5);
@@ -1922,6 +2208,7 @@ function useFighterAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 22;
     playSound("ultimate");
+    sendMultiplayerAttack("r", "Whirlwind", 0xe0a34f);
     damageArea(player.position, 6.3, 76, "Whirlwind", 0xe0a34f, { knock: 10 });
     makeGroundRing(player.position, 6.3, 0xe0a34f, 0.7);
     addFeed("Whirlwind released", "Ultimate");
@@ -1932,6 +2219,7 @@ function usePriestAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.5;
     playSound("zone");
+    sendMultiplayerAttack("q", "Fire Field", 0xf26f45);
     const point = getAimGroundPoint(18);
     const mesh = makeGroundRing(point, 4.3, 0xf26f45, 4.2, true);
     timedZones.push({
@@ -1951,6 +2239,7 @@ function usePriestAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 8.0;
     playSound("wall");
+    sendMultiplayerAttack("e", "Ice Wall", 0x95d5ee);
     const point = getAimGroundPoint(9);
     const forward = getFlatForward();
     const wall = new THREE.Mesh(
@@ -1974,6 +2263,7 @@ function usePriestAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 24;
     playSound("ultimate");
+    sendMultiplayerAttack("r", "Meteor Shower", 0xf26f45);
     const center = getAimGroundPoint(18);
     for (let i = 0; i < 9; i++) {
       setTimeout(() => {
@@ -1991,6 +2281,7 @@ function useRangerAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 4.2;
     playSound("dash");
+    sendMultiplayerAttack("q", "Roll", 0x7fcf79);
     const right = getFlatRight();
     const forward = getFlatForward();
     const direction = input.left ? right.multiplyScalar(-1) : input.right ? right : forward.multiplyScalar(-1);
@@ -2003,6 +2294,7 @@ function useRangerAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 6.6;
     playSound("trap");
+    sendMultiplayerAttack("e", "Trap", 0x7fcf79);
     const point = getAimGroundPoint(6);
     const trap = makeGroundRing(point, 2.2, 0x7fcf79, 8, true);
     timedZones.push({
@@ -2014,14 +2306,26 @@ function useRangerAbility(slot) {
       opacity: 0.34,
       spin: 0.1,
       onTick(zone) {
+        let triggered = false;
         for (const enemy of enemies) {
           if (!enemy.alive) continue;
           if (horizontalDistance(zone.mesh.position, enemy.group.position) < 2.2) {
             hitEnemy(enemy, 34, "Trap", 0x7fcf79, { freeze: 1.0, knock: 3 });
-            zone.life = 0;
+            triggered = true;
             break;
           }
         }
+        if (!triggered) {
+          for (const remote of remotePlayers.values()) {
+            if (!isRemoteAlive(remote)) continue;
+            if (horizontalDistance(zone.mesh.position, remote.group.position) < 2.2) {
+              hitRemotePlayer(remote, 34, "Trap", 0x7fcf79, { freeze: 1.0, knock: 3 });
+              triggered = true;
+              break;
+            }
+          }
+        }
+        if (triggered) zone.life = 0;
       },
     });
   }
@@ -2029,6 +2333,7 @@ function useRangerAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 21;
     playSound("ultimate");
+    sendMultiplayerAttack("r", "Arrow Rain", 0x7fcf79);
     const center = getAimGroundPoint(17);
     for (let i = 0; i < 14; i++) {
       setTimeout(() => {
@@ -2046,6 +2351,7 @@ function useWitchAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.4;
     playSound("zone");
+    sendMultiplayerAttack("q", "Silence", 0xb77ce8);
     const point = getAimGroundPoint(13);
     const mesh = makeGroundRing(point, 4.6, 0xb77ce8, 3.5, true);
     timedZones.push({
@@ -2071,6 +2377,7 @@ function useWitchAbility(slot) {
   if (slot === "e") {
     cooldowns.e = 7.2;
     playSound("witch");
+    sendMultiplayerAttack("e", "Fear", 0xb77ce8);
     damageArea(player.position, 7.4, 18, "Fear", 0xb77ce8, { fear: 2.2, knock: 7 });
     makeGroundRing(player.position, 7.4, 0xb77ce8, 0.7);
   }
@@ -2078,6 +2385,7 @@ function useWitchAbility(slot) {
   if (slot === "r") {
     cooldowns.r = 24;
     playSound("ultimate");
+    sendMultiplayerAttack("r", "Banshee Scream", 0xb77ce8);
     meleeCone({
       range: 15,
       angle: 1.22,
@@ -2114,6 +2422,15 @@ function checkChargeHits() {
       hitEnemy(enemy, 48, "Sprint Charge", 0xe0a34f, { knock: 14 });
     }
   }
+
+  for (const remote of remotePlayers.values()) {
+    const hitId = `remote:${remote.id}`;
+    if (!isRemoteAlive(remote) || player.chargeHits.has(hitId)) continue;
+    if (horizontalDistance(player.position, remote.group.position) < 2.4) {
+      player.chargeHits.add(hitId);
+      hitRemotePlayer(remote, 48, "Sprint Charge", 0xe0a34f, { knock: 14 });
+    }
+  }
 }
 
 function meleeCone({ range, angle, damage, label, color, extra = {} }) {
@@ -2131,6 +2448,20 @@ function meleeCone({ range, angle, damage, label, color, extra = {} }) {
       any = true;
     }
   }
+
+  for (const remote of remotePlayers.values()) {
+    if (!isRemoteAlive(remote)) continue;
+    const toRemote = tmpVec.copy(remote.group.position).sub(player.position);
+    toRemote.y = 0;
+    const distance = toRemote.length();
+    if (distance > range) continue;
+    const dot = toRemote.normalize().dot(forward);
+    if (dot > Math.cos(angle)) {
+      hitRemotePlayer(remote, damage, label, color, extra);
+      any = true;
+    }
+  }
+
   if (!any) addFeed(`${label} missed`, "Combat");
 }
 
@@ -2145,6 +2476,17 @@ function damageArea(center, radius, damage, label, color, extra = {}) {
       hits += 1;
     }
   }
+
+  for (const remote of remotePlayers.values()) {
+    if (!isRemoteAlive(remote)) continue;
+    const distance = horizontalDistance(center, remote.group.position);
+    if (distance <= radius) {
+      const falloff = clamp(1 - distance / radius, 0.35, 1);
+      hitRemotePlayer(remote, damage * falloff, label, color, extra);
+      hits += 1;
+    }
+  }
+
   if (hits === 0 && !extra.quiet) addFeed(`${label} found no target`, "Combat");
 }
 
@@ -2175,6 +2517,24 @@ function hitEnemy(enemy, amount, label, color, extra = {}) {
   } else if (!extra.quiet && Math.random() > 0.48) {
     addFeed(`${label} hit Echo ${enemy.id + 1}`, "Hit");
   }
+}
+
+function hitRemotePlayer(remote, amount, label, color, extra = {}) {
+  if (!isRemoteAlive(remote)) return;
+
+  const sent = sendMultiplayerHit(remote, amount, label, color, extra);
+  if (!sent) return;
+
+  spawnHitBurst(remote.group.position.clone().add(new THREE.Vector3(0, 1.3, 0)), color);
+  if (!extra.quiet) {
+    playSound("hit", clamp(amount / 60, 0.45, 1.25));
+    spawnFloatingText(remote.group.position.clone().add(new THREE.Vector3(0, 2.8, 0)), Math.round(amount), color);
+    if (Math.random() > 0.48) addFeed(`${label} hit player`, "Hit");
+  }
+}
+
+function isRemoteAlive(remote) {
+  return remote?.group?.visible !== false && !remote.state?.dead && (remote.state?.hp ?? 0) > 0;
 }
 
 function killEnemy(enemy, label) {
@@ -2223,6 +2583,7 @@ function damagePlayer(amount, enemy) {
     player.hp = 0;
     playSound("death");
     addFeed("Respawning", "Defeated");
+    sendMultiplayerState(true);
   }
 }
 
@@ -2235,6 +2596,7 @@ function respawnPlayer() {
   player.chargingShot = false;
   player.chargeRush = 0;
   addFeed("Back in the arena", "Spawn");
+  sendMultiplayerState(true);
 }
 
 function spawnProjectile({
@@ -2485,10 +2847,17 @@ function getAimGroundPoint(maxDistance) {
 }
 
 function isEnemyInFront(enemy) {
+  return isSourceInFront(enemy);
+}
+
+function isSourceInFront(source) {
   const forward = getFlatForward();
-  const toEnemy = enemy.group.position.clone().sub(player.position);
-  toEnemy.y = 0;
-  return toEnemy.normalize().dot(forward) > 0.2;
+  const sourcePosition = source?.group?.position ?? source?.position;
+  if (!sourcePosition) return false;
+  const toSource = sourcePosition.clone().sub(player.position);
+  toSource.y = 0;
+  if (toSource.lengthSq() <= 0.01) return false;
+  return toSource.normalize().dot(forward) > 0.2;
 }
 
 function horizontalDistance(a, b) {

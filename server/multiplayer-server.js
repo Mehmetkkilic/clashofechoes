@@ -215,6 +215,24 @@ wss.on("connection", (ws, request) => {
     if (message.type === "state" && message.state) {
       client.state = sanitizeState(message.state);
       broadcast(room, { type: "peer-state", id, state: client.state }, id);
+      return;
+    }
+
+    if (message.type === "attack" && message.attack) {
+      broadcast(room, { type: "peer-attack", id, attack: sanitizeAttack(message.attack) }, id);
+      return;
+    }
+
+    if (message.type === "hit") {
+      const hit = sanitizeHit(message);
+      const target = clients.get(hit.targetId);
+      if (!target || target.room !== room) return;
+      send(target.ws, { type: "damage", attackerId: id, hit });
+      return;
+    }
+
+    if (message.type === "death" && message.death) {
+      broadcast(room, { type: "peer-death", id, death: sanitizeDeath(message.death) }, id);
     }
   });
 
@@ -232,11 +250,46 @@ function sanitizeState(state) {
     score: numberValue(state.score, 0, 999),
     deaths: numberValue(state.deaths, 0, 999),
     yaw: numberValue(state.yaw, -Math.PI * 4, Math.PI * 4),
+    shield: booleanValue(state.shield),
+    chargingShot: booleanValue(state.chargingShot),
+    dead: booleanValue(state.dead),
     position: {
       x: numberValue(state.position?.x, -60, 60),
       y: numberValue(state.position?.y, 0, 20),
       z: numberValue(state.position?.z, -60, 60),
     },
+  };
+}
+
+function sanitizeAttack(attack) {
+  return {
+    classId: stringValue(attack.classId, "fighter", 20),
+    slot: stringValue(attack.slot, "primary", 20),
+    label: stringValue(attack.label, "Attack", 40),
+    color: colorValue(attack.color, 0xe0a34f),
+    yaw: numberValue(attack.yaw, -Math.PI * 4, Math.PI * 4),
+    position: {
+      x: numberValue(attack.position?.x, -60, 60),
+      y: numberValue(attack.position?.y, 0, 20),
+      z: numberValue(attack.position?.z, -60, 60),
+    },
+  };
+}
+
+function sanitizeHit(message) {
+  return {
+    targetId: stringValue(message.targetId, "", 80),
+    amount: numberValue(message.amount, 0, 200),
+    label: stringValue(message.label, "Hit", 40),
+    color: colorValue(message.color, 0xe0a34f),
+    knock: numberValue(message.knock, 0, 24),
+  };
+}
+
+function sanitizeDeath(death) {
+  return {
+    killerId: stringValue(death.killerId, "", 80),
+    label: stringValue(death.label, "Defeated", 40),
   };
 }
 
@@ -249,4 +302,14 @@ function numberValue(value, min, max) {
 function stringValue(value, fallback, maxLength) {
   if (typeof value !== "string") return fallback;
   return value.slice(0, maxLength);
+}
+
+function booleanValue(value) {
+  return value === true;
+}
+
+function colorValue(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.round(Math.min(0xffffff, Math.max(0, parsed)));
 }
