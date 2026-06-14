@@ -273,6 +273,7 @@ function sanitizeAttack(attack) {
       y: numberValue(attack.position?.y, 0, 20),
       z: numberValue(attack.position?.z, -60, 60),
     },
+    direction: sanitizeDirection(attack.direction),
   };
 }
 
@@ -312,4 +313,19 @@ function colorValue(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.round(Math.min(0xffffff, Math.max(0, parsed)));
+}
+
+function sanitizeDirection(direction) {
+  if (!direction || typeof direction !== "object") return null;
+  return {
+    x: directionValue(direction.x, 0),
+    y: directionValue(direction.y, 0),
+    z: directionValue(direction.z, -1),
+  };
+}
+
+function directionValue(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(1, Math.max(-1, parsed));
 }

@@ -723,6 +723,7 @@ function sendMultiplayerMessage(message) {
 }
 
 function sendMultiplayerAttack(slot, label, color) {
+  const direction = getCameraForward();
   sendMultiplayerMessage({
     type: "attack",
     attack: {
@@ -735,6 +736,11 @@ function sendMultiplayerAttack(slot, label, color) {
         x: player.position.x,
         y: player.position.y,
         z: player.position.z,
+      },
+      direction: {
+        x: direction.x,
+        y: direction.y,
+        z: direction.z,
       },
     },
   });
@@ -771,24 +777,12 @@ function animateRemoteAttack(id, attack = {}) {
 function spawnRemoteAttackEffect(remote, attack) {
   const color = attack.color ?? classColor(remote.classId);
   const label = attack.label || "Attack";
-  const origin = remote.group.position.clone();
-  origin.y += 1.22;
+  const origin = attack.position
+    ? new THREE.Vector3(attack.position.x, attack.position.y, attack.position.z)
+    : remote.group.position.clone().add(new THREE.Vector3(0, 1.72, 0));
 
   if (label.includes("Arrow") || label.includes("Fire") || label.includes("Ice") || label.includes("Wave")) {
-    const forward = new THREE.Vector3(Math.sin(remote.group.rotation.y), 0, Math.cos(remote.group.rotation.y));
-    const mesh = createProjectileMesh(label.includes("Arrow") ? "arrow" : label.includes("Ice") ? "ice" : label.includes("Wave") ? "wave" : "sphere", color, 0.34);
-    mesh.position.copy(origin).add(forward.clone().multiplyScalar(0.8));
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), forward.clone().normalize());
-    scene.add(mesh);
-    effects.push({
-      mesh,
-      life: 0.36,
-      maxLife: 0.36,
-      update(effect, progress, dt) {
-        effect.mesh.position.addScaledVector(forward, dt * 24);
-        setObjectOpacity(effect.mesh, Math.max(0, 0.9 * (1 - progress)));
-      },
-    });
+    spawnRemoteProjectile(attack, origin, color, label);
     return;
   }
 
@@ -798,6 +792,55 @@ function spawnRemoteAttackEffect(remote, attack) {
   }
 
   makeGroundRing(remote.group.position, 2.4, color, 0.28);
+}
+
+function spawnRemoteProjectile(attack, origin, color, label) {
+  const config = remoteProjectileConfig(label);
+  const direction = getAttackDirection(attack);
+  const start = origin.clone().add(direction.clone().multiplyScalar(1.1));
+  start.y -= 0.12;
+
+  const mesh = createProjectileMesh(config.shape, color, config.radius);
+  mesh.position.copy(start);
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+  scene.add(mesh);
+
+  effects.push({
+    mesh,
+    life: config.life,
+    maxLife: config.life,
+    update(effect, progress, dt) {
+      effect.mesh.position.addScaledVector(direction, config.speed * dt);
+      if (config.spin) effect.mesh.rotation[config.spin.axis] += config.spin.speed * dt;
+      setObjectOpacity(effect.mesh, Math.max(0, 0.94 * (1 - progress)));
+    },
+  });
+}
+
+function remoteProjectileConfig(label) {
+  if (label.includes("Charged Arrow")) {
+    return { shape: "arrow", radius: 0.48, speed: 58, life: 1.55 };
+  }
+  if (label.includes("Arrow")) {
+    return { shape: "arrow", radius: 0.36, speed: 44, life: 1.6 };
+  }
+  if (label.includes("Ice")) {
+    return { shape: "ice", radius: 0.42, speed: 34, life: 1.7 };
+  }
+  if (label.includes("Wave")) {
+    return { shape: "wave", radius: 0.76, speed: 30, life: 1.35, spin: { axis: "z", speed: 12 } };
+  }
+  return { shape: "sphere", radius: 0.55, speed: 24, life: 2.0 };
+}
+
+function getAttackDirection(attack) {
+  const raw = attack.direction;
+  if (raw) {
+    const direction = new THREE.Vector3(raw.x, raw.y, raw.z);
+    if (direction.lengthSq() > 0.01) return direction.normalize();
+  }
+
+  return new THREE.Vector3(0, 0, -1).applyAxisAngle(upAxis, attack.yaw ?? 0).normalize();
 }
 
 function applyPeerDamage(attackerId, hit = {}) {
