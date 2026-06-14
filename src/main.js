@@ -1336,6 +1336,66 @@ function applyLightingSettings() {
   });
 }
 
+// --- Collision system ------------------------------------------------------
+// Static colliders are registered while the arena is built, then resolved each
+// frame with a simple slide (push-out along the contact normal) so tangential
+// movement is preserved. Player and enemies are treated as circles in XZ.
+const boxColliders = [];
+const circleColliders = [];
+const PLAYER_RADIUS = 0.5;
+const ENEMY_RADIUS = 0.6;
+
+function registerBoxCollider(x, z, halfW, halfD, pad = 0.12) {
+  boxColliders.push({ x, z, hw: halfW + pad, hd: halfD + pad });
+}
+
+function registerCircleCollider(x, z, radius) {
+  circleColliders.push({ x, z, r: radius });
+}
+
+function resolveCircleVsCircle(pos, radius, cx, cz, cr) {
+  const dx = pos.x - cx;
+  const dz = pos.z - cz;
+  const minDist = radius + cr;
+  const distSq = dx * dx + dz * dz;
+  if (distSq >= minDist * minDist) return;
+  const dist = Math.sqrt(distSq) || 0.0001;
+  const push = minDist - dist;
+  pos.x += (dx / dist) * push;
+  pos.z += (dz / dist) * push;
+}
+
+function resolveCircleVsBox(pos, radius, bx, bz, hw, hd) {
+  const dx = pos.x - bx;
+  const dz = pos.z - bz;
+  const closestX = clamp(dx, -hw, hw);
+  const closestZ = clamp(dz, -hd, hd);
+  const ox = dx - closestX;
+  const oz = dz - closestZ;
+  const distSq = ox * ox + oz * oz;
+  if (distSq > radius * radius) return;
+  if (distSq > 1e-8) {
+    const dist = Math.sqrt(distSq);
+    const push = radius - dist;
+    pos.x += (ox / dist) * push;
+    pos.z += (oz / dist) * push;
+  } else {
+    // Center is inside the box: eject along the axis of least penetration.
+    const penX = hw - Math.abs(dx) + radius;
+    const penZ = hd - Math.abs(dz) + radius;
+    if (penX < penZ) {
+      pos.x += dx >= 0 ? penX : -penX;
+    } else {
+      pos.z += dz >= 0 ? penZ : -penZ;
+    }
+  }
+}
+
+function resolveCollisions(pos, radius) {
+  for (const c of circleColliders) resolveCircleVsCircle(pos, radius, c.x, c.z, c.r);
+  for (const b of boxColliders) resolveCircleVsBox(pos, radius, b.x, b.z, b.hw, b.hd);
+}
+
 function setupArena() {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(108, 108, 12, 12), materials.grass);
   ground.rotation.x = -Math.PI / 2;
@@ -1393,6 +1453,7 @@ function addTowers() {
   ];
 
   spots.forEach(([x, z]) => {
+    registerCircleCollider(x, z, 7.2);
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 7.4, 16, 8), materials.darkStone);
     tower.position.set(x, 8, z);
     tower.castShadow = true;
@@ -1425,13 +1486,17 @@ function addRuins() {
     [18, -17, 2.2, 10, 3.8],
   ];
 
-  ruinSpecs.forEach(([x, z, w, d, h]) => addBlock(x, z, w, d, h, h / 2, materials.stone));
+  ruinSpecs.forEach(([x, z, w, d, h]) => {
+    registerBoxCollider(x, z, w / 2, d / 2);
+    addBlock(x, z, w, d, h, h / 2, materials.stone);
+  });
 
   const centerObelisk = new THREE.Mesh(new THREE.ConeGeometry(3.2, 8.5, 5), materials.darkStone);
   centerObelisk.position.set(0, 4.25, 0);
   centerObelisk.castShadow = true;
   centerObelisk.receiveShadow = true;
   scene.add(centerObelisk);
+  registerCircleCollider(0, 0, 2.9);
 }
 
 function addArcherPlatforms() {
@@ -1490,6 +1555,7 @@ function addProps() {
   ];
 
   spots.forEach(([x, z], index) => {
+    registerCircleCollider(x, z, 1.0);
     const mesh = new THREE.Mesh(index % 2 ? crateGeo : barrelGeo, materials.wood);
     mesh.position.set(x, index % 2 ? 0.95 : 0.8, z);
     mesh.rotation.y = index * 0.72;
@@ -2085,6 +2151,7 @@ function updatePlayer(dt) {
     player.velocity.y = 0;
   }
 
+  resolveCollisions(player.position, PLAYER_RADIUS);
   player.position.x = clamp(player.position.x, -47, 47);
   player.position.z = clamp(player.position.z, -47, 47);
 }
@@ -2229,6 +2296,7 @@ function updateEnemies(dt) {
       enemy.group.position.addScaledVector(move, enemy.speed * dt);
       enemy.group.position.addScaledVector(enemy.knock, dt);
       enemy.knock.multiplyScalar(Math.pow(0.05, dt));
+      resolveCollisions(enemy.group.position, ENEMY_RADIUS);
       enemy.group.position.x = clamp(enemy.group.position.x, -46, 46);
       enemy.group.position.z = clamp(enemy.group.position.z, -46, 46);
 
