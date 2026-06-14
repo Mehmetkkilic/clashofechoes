@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clash of Echoes - Combat Demo</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="game"></canvas>
+
+      <div class="reticle" aria-hidden="true"></div>
+      <div id="hit-vignette" class="hit-vignette" aria-hidden="true"></div>
+
+      <section class="hud top-hud" aria-label="Match status">
+        <div>
+          <p class="eyebrow">Castle Ruins</p>
+          <h1>Clash of Echoes</h1>
+        </div>
+        <div class="stats">
+          <div>
+            <span>Kills</span>
+            <strong id="score">0</strong>
+          </div>
+          <div>
+            <span>Deaths</span>
+            <strong id="deaths">0</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="hud lighting-hud" aria-label="Lighting controls">
+        <div class="lighting-toggle" role="group" aria-label="Time of day">
+          <button class="lighting-button" data-light-mode="day" type="button">Day</button>
+          <button class="lighting-button active" data-light-mode="night" type="button">Night</button>
+        </div>
+        <label class="lighting-slider">
+          <span>Light</span>
+          <input id="light-level" type="range" min="35" max="120" value="62" />
+          <strong id="light-level-text">62%</strong>
+        </label>
+      </section>
+
+      <section class="hud multiplayer-hud" aria-label="Multiplayer status">
+        <strong id="mp-status">MP Offline</strong>
+        <span id="mp-room">local</span>
+      </section>
+
+      <section class="hud class-hud" aria-label="Class selection">
+        <button class="class-button active" data-class="fighter">
+          <span>Fighter</span>
+          <small>150 HP</small>
+        </button>
+        <button class="class-button" data-class="priest">
+          <span>Priest</span>
+          <small>100 HP</small>
+        </button>
+        <button class="class-button" data-class="ranger">
+          <span>Ranger</span>
+          <small>100 HP</small>
+        </button>
+        <button class="class-button" data-class="witch">
+          <span>Witch</span>
+          <small>90 HP</small>
+        </button>
+      </section>
+
+      <section class="hud health-hud" aria-label="Player health">
+        <div class="health-row">
+          <strong id="class-name">Fighter</strong>
+          <span id="hp-text">150 / 150</span>
+        </div>
+        <div class="health-track">
+          <div id="hp-bar" class="health-fill"></div>
+        </div>
+      </section>
+
+      <section class="hud ability-hud" aria-label="Abilities">
+        <div class="ability" data-slot="primary">
+          <kbd>LMB</kbd>
+          <span id="primary-name">Sword Slash</span>
+          <strong id="primary-cd"></strong>
+        </div>
+        <div class="ability" data-slot="secondary">
+          <kbd>RMB</kbd>
+          <span id="secondary-name">Shield</span>
+          <strong id="secondary-cd"></strong>
+        </div>
+        <div class="ability" data-slot="q">
+          <kbd>Q</kbd>
+          <span id="q-name">Shield Bash</span>
+          <strong id="q-cd"></strong>
+        </div>
+        <div class="ability" data-slot="e">
+          <kbd>E</kbd>
+          <span id="e-name">Sprint Charge</span>
+          <strong id="e-cd"></strong>
+        </div>
+        <div class="ability ultimate" data-slot="r">
+          <kbd>R</kbd>
+          <span id="r-name">Whirlwind</span>
+          <strong id="r-cd"></strong>
+        </div>
+      </section>
+
+      <section id="status-feed" class="hud status-feed" aria-label="Combat feed"></section>
+
+      <button id="lock-panel" class="lock-panel">
+        <strong>Enter Arena</strong>
+        <span>Prototype build</span>
+      </button>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
