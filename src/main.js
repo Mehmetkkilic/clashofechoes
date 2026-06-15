@@ -853,6 +853,7 @@ function sendMultiplayerState(force = false) {
         shield: player.shield,
         chargingShot: player.chargingShot,
         dead: player.deadTimer > 0,
+        ready: matchStarted,
         yaw,
         position: {
           x: player.position.x,
@@ -1145,17 +1146,19 @@ function applyPeerDamage(attackerId, hit = {}) {
 
 function handlePeerDeath(victimId, death = {}) {
   if (!victimId) return;
+  const victim = remotePlayers.get(victimId);
+  const victimLabel = victim?.isBot ? victim.state?.name || "Bot" : "Player";
 
   if (death.killerId === multiplayer.id) {
     player.score += 1;
     playSound("kill");
-    addFeed("Player down", death.label || "Elimination");
+    addFeed(`${victimLabel} down`, death.label || "Elimination");
     sendMultiplayerState(true);
     return;
   }
 
-  if (remotePlayers.has(victimId)) {
-    addFeed("Player down", death.label || "Elimination");
+  if (victim) {
+    addFeed(`${victimLabel} down`, death.label || "Elimination");
   }
 }
 
@@ -1700,6 +1703,7 @@ function createRemotePlayer(id, state) {
     group,
     body,
     weapon,
+    isBot: Boolean(state.bot),
     classId: state.classId,
     healthFill: fill,
     target: new THREE.Vector3(),
@@ -1714,10 +1718,11 @@ function updateRemotePlayer(id, state) {
   if (!remote) {
     remote = createRemotePlayer(id, state);
     remotePlayers.set(id, remote);
-    addFeed("Player joined", "Multiplayer");
+    addFeed(state.bot ? `${state.name || "Bot"} joined` : "Player joined", "Multiplayer");
   }
 
   remote.state = state;
+  remote.isBot = Boolean(state.bot);
   remote.target.set(state.position.x, state.position.y - 1.72, state.position.z);
   if (remote.classId !== state.classId) {
     remote.group.remove(remote.weapon);

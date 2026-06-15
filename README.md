@@ -22,6 +22,14 @@ Start the multiplayer WebSocket server in another terminal:
 npm run server
 ```
 
+Open two browser tabs with the same room query to test synchronized hits:
+
+```text
+http://127.0.0.1:5173/?room=test
+```
+
+The server also runs two synchronized room bots. They are sent through the same `peer-state`, `peer-attack`, `hit`, `damage`, and `peer-death` loop as real players, so bots can damage players and players can kill/respawn bots.
+
 ## Railway Deployment
 
 Railway uses `railway.json`:

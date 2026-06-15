@@ -11,9 +11,28 @@ const host = process.env.HOST || "0.0.0.0";
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(serverDir, "../dist");
 const clients = new Map();
+const rooms = new Map();
 const server = http.createServer(handleRequest);
 const wss = new WebSocketServer({ server });
 const heartbeatIntervalMs = 15000;
+const botTickMs = 50;
+const botBroadcastMs = 100;
+const botsPerRoom = 2;
+
+const botClasses = ["fighter", "ranger"];
+const classStats = {
+  fighter: { hp: 150, speed: 4.8, color: 0xe0a34f },
+  priest: { hp: 100, speed: 5.0, color: 0xf26f45 },
+  ranger: { hp: 100, speed: 5.4, color: 0x7fcf79 },
+  witch: { hp: 90, speed: 5.1, color: 0xb77ce8 },
+};
+
+const botSpawnPoints = [
+  { x: -18, z: -16 },
+  { x: 18, z: -16 },
+  { x: -20, z: 18 },
+  { x: 20, z: 18 },
+];
 
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
@@ -53,8 +72,11 @@ const heartbeatTimer = setInterval(() => {
   }
 }, heartbeatIntervalMs);
 
+const botTimer = setInterval(updateRooms, botTickMs);
+
 server.on("close", () => {
   clearInterval(heartbeatTimer);
+  clearInterval(botTimer);
 });
 
 async function handleRequest(request, response) {
@@ -68,6 +90,8 @@ async function handleRequest(request, response) {
     sendJson(response, 200, {
       ok: true,
       clients: clients.size,
+      rooms: rooms.size,
+      bots: [...rooms.values()].reduce((total, room) => total + room.bots.size, 0),
       uptime: Math.round(process.uptime()),
     });
     return;
@@ -200,9 +224,12 @@ function broadcast(room, message, exceptId = null) {
 }
 
 function peersFor(room, exceptId) {
-  return [...clients.entries()]
+  const roomState = rooms.get(room);
+  const humanPeers = [...clients.entries()]
     .filter(([id, client]) => id !== exceptId && client.room === room && client.state)
     .map(([id, client]) => ({ id, state: client.state }));
+  const botPeers = roomState ? [...roomState.bots.values()].map((bot) => ({ id: bot.id, state: botState(bot) })) : [];
+  return [...humanPeers, ...botPeers];
 }
 
 function removeClient(id) {
@@ -210,12 +237,16 @@ function removeClient(id) {
   if (!client) return;
   clients.delete(id);
   broadcast(client.room, { type: "peer-left", id }, id);
+  if (clientsForRoom(client.room).length === 0) {
+    rooms.delete(client.room);
+  }
 }
 
 wss.on("connection", (ws, request) => {
   const url = new URL(request.url, "ws://localhost");
   const id = crypto.randomUUID();
   const room = url.searchParams.get("room") || "public";
+  const roomState = getRoom(room);
 
   clients.set(id, {
     id,
@@ -224,6 +255,8 @@ wss.on("connection", (ws, request) => {
     state: null,
     isAlive: true,
   });
+
+  ensureRoomBots(roomState);
 
   send(ws, {
     type: "welcome",
@@ -258,12 +291,19 @@ wss.on("connection", (ws, request) => {
     }
 
     if (message.type === "attack" && message.attack) {
-      broadcast(room, { type: "peer-attack", id, attack: sanitizeAttack(message.attack) }, id);
+      const attack = sanitizeAttack(message.attack);
+      broadcast(room, { type: "peer-attack", id, attack }, id);
       return;
     }
 
     if (message.type === "hit") {
       const hit = sanitizeHit(message);
+      const targetBot = roomState.bots.get(hit.targetId);
+      if (targetBot) {
+        damageBot(roomState, targetBot, id, hit);
+        return;
+      }
+
       const target = clients.get(hit.targetId);
       if (!target || target.room !== room) return;
       send(target.ws, { type: "damage", attackerId: id, hit });
@@ -271,7 +311,13 @@ wss.on("connection", (ws, request) => {
     }
 
     if (message.type === "death" && message.death) {
-      broadcast(room, { type: "peer-death", id, death: sanitizeDeath(message.death) }, id);
+      const death = sanitizeDeath(message.death);
+      const killerBot = roomState.bots.get(death.killerId);
+      if (killerBot) {
+        killerBot.score += 1;
+        broadcast(roomState.name, { type: "peer-state", id: killerBot.id, state: botState(killerBot) });
+      }
+      broadcast(room, { type: "peer-death", id, death }, id);
     }
   });
 
@@ -285,6 +331,297 @@ wss.on("connection", (ws, request) => {
   });
 });
 
+function getRoom(name) {
+  let room = rooms.get(name);
+  if (!room) {
+    room = {
+      name,
+      bots: new Map(),
+      botSeed: crypto.randomUUID().slice(0, 8),
+      nextBotSlot: 0,
+      lastTickAt: Date.now(),
+    };
+    rooms.set(name, room);
+  }
+  return room;
+}
+
+function ensureRoomBots(room) {
+  while (room.bots.size < botsPerRoom) {
+    const slot = room.nextBotSlot;
+    room.nextBotSlot += 1;
+    const classId = botClasses[slot % botClasses.length];
+    const stats = classStats[classId] || classStats.fighter;
+    const spawn = botSpawnPoints[slot % botSpawnPoints.length];
+    const bot = {
+      id: `bot:${room.botSeed}:${slot}`,
+      slot,
+      classId,
+      hp: stats.hp,
+      maxHp: stats.hp,
+      score: 0,
+      deaths: 0,
+      dead: false,
+      respawn: 0,
+      attackCd: 0.45 + Math.random() * 0.7,
+      lastBroadcastAt: 0,
+      yaw: 0,
+      position: {
+        x: spawn.x,
+        y: 1.72,
+        z: spawn.z,
+      },
+      wander: randomFlatDirection(),
+      nextWander: 0.8 + Math.random() * 1.6,
+    };
+    room.bots.set(bot.id, bot);
+    broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+  }
+}
+
+function updateRooms() {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    const roomClients = clientsForRoom(room.name);
+    if (roomClients.length === 0) {
+      rooms.delete(room.name);
+      continue;
+    }
+
+    ensureRoomBots(room);
+
+    const dt = Math.min(0.1, Math.max(0.001, (now - room.lastTickAt) / 1000));
+    room.lastTickAt = now;
+    const targets = roomClients.filter((client) => isClientAlive(client));
+
+    for (const bot of room.bots.values()) {
+      updateBot(room, bot, targets, now, dt);
+    }
+  }
+}
+
+function updateBot(room, bot, targets, now, dt) {
+  if (bot.dead) {
+    bot.respawn -= dt;
+    if (bot.respawn <= 0) {
+      respawnBot(bot);
+      broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+    }
+    return;
+  }
+
+  bot.attackCd = Math.max(0, bot.attackCd - dt);
+  const target = nearestTarget(bot, targets);
+
+  if (target) {
+    moveBotTowardTarget(bot, target, dt);
+    tryBotAttack(room, bot, target);
+  } else {
+    wanderBot(bot, dt);
+  }
+
+  if (now - bot.lastBroadcastAt >= botBroadcastMs) {
+    bot.lastBroadcastAt = now;
+    broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+  }
+}
+
+function moveBotTowardTarget(bot, target, dt) {
+  const targetPosition = target.state.position;
+  const dx = targetPosition.x - bot.position.x;
+  const dz = targetPosition.z - bot.position.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= 0.001) return;
+
+  bot.yaw = yawToward(dx, dz);
+  if (distance <= 2.55) return;
+
+  const stats = classStats[bot.classId] || classStats.fighter;
+  const step = Math.min(distance - 2.2, stats.speed * dt);
+  bot.position.x += (dx / distance) * step;
+  bot.position.z += (dz / distance) * step;
+  clampBotPosition(bot);
+}
+
+function wanderBot(bot, dt) {
+  bot.nextWander -= dt;
+  if (bot.nextWander <= 0) {
+    bot.wander = randomFlatDirection();
+    bot.nextWander = 0.8 + Math.random() * 1.8;
+  }
+
+  const stats = classStats[bot.classId] || classStats.fighter;
+  bot.position.x += bot.wander.x * stats.speed * 0.35 * dt;
+  bot.position.z += bot.wander.z * stats.speed * 0.35 * dt;
+  bot.yaw = yawToward(bot.wander.x, bot.wander.z);
+  clampBotPosition(bot);
+}
+
+function tryBotAttack(room, bot, target) {
+  if (bot.attackCd > 0 || !target.state) return;
+  const distance = horizontalDistance(bot.position, target.state.position);
+  if (distance > 2.75) return;
+
+  bot.attackCd = 0.95 + Math.random() * 0.35;
+  const stats = classStats[bot.classId] || classStats.fighter;
+  const direction = directionTo(bot.position, target.state.position);
+  const attack = {
+    classId: bot.classId,
+    slot: "primary",
+    label: "Slash",
+    color: stats.color,
+    yaw: bot.yaw,
+    position: { ...bot.position },
+    target: null,
+    direction,
+  };
+
+  broadcast(room.name, { type: "peer-attack", id: bot.id, attack });
+  send(target.ws, {
+    type: "damage",
+    attackerId: bot.id,
+    hit: {
+      targetId: target.id,
+      amount: 12,
+      label: "Bot Slash",
+      color: stats.color,
+      knock: 5,
+    },
+  });
+}
+
+function damageBot(room, bot, attackerId, hit) {
+  if (bot.dead) return;
+  const amount = Math.round(numberValue(hit.amount, 0, 200));
+  if (amount <= 0) return;
+
+  bot.hp = Math.max(0, bot.hp - amount);
+  applyBotKnockback(bot, attackerId, hit.knock ?? 0);
+
+  if (bot.hp <= 0) {
+    bot.dead = true;
+    bot.deaths += 1;
+    bot.respawn = 2.1;
+    broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+    broadcast(room.name, {
+      type: "peer-death",
+      id: bot.id,
+      death: {
+        killerId: attackerId,
+        label: hit.label || "Defeated",
+      },
+    });
+    return;
+  }
+
+  broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+}
+
+function applyBotKnockback(bot, attackerId, knock) {
+  if (!knock) return;
+  const attacker = clients.get(attackerId);
+  if (!attacker?.state?.position) return;
+  const dx = bot.position.x - attacker.state.position.x;
+  const dz = bot.position.z - attacker.state.position.z;
+  const distance = Math.hypot(dx, dz);
+  if (distance <= 0.001) return;
+
+  const push = Math.min(1.4, knock * 0.055);
+  bot.position.x += (dx / distance) * push;
+  bot.position.z += (dz / distance) * push;
+  clampBotPosition(bot);
+}
+
+function respawnBot(bot) {
+  const spawn = botSpawnPoints[bot.slot % botSpawnPoints.length];
+  const stats = classStats[bot.classId] || classStats.fighter;
+  bot.position.x = spawn.x + (Math.random() - 0.5) * 5;
+  bot.position.y = 1.72;
+  bot.position.z = spawn.z + (Math.random() - 0.5) * 5;
+  bot.hp = bot.maxHp || stats.hp;
+  bot.dead = false;
+  bot.attackCd = 0.85 + Math.random() * 0.8;
+  bot.wander = randomFlatDirection();
+  bot.nextWander = 0.8 + Math.random() * 1.8;
+  clampBotPosition(bot);
+}
+
+function botState(bot) {
+  return {
+    classId: bot.classId,
+    hp: bot.hp,
+    maxHp: bot.maxHp,
+    score: bot.score,
+    deaths: bot.deaths,
+    yaw: bot.yaw,
+    shield: false,
+    chargingShot: false,
+    dead: bot.dead,
+    bot: true,
+    name: `Bot ${bot.slot + 1}`,
+    position: {
+      x: bot.position.x,
+      y: bot.position.y,
+      z: bot.position.z,
+    },
+  };
+}
+
+function clientsForRoom(room) {
+  return [...clients.values()].filter((client) => client.room === room);
+}
+
+function isClientAlive(client) {
+  return client.state?.ready && !client.state.dead && (client.state.hp ?? 0) > 0;
+}
+
+function nearestTarget(bot, targets) {
+  let nearest = null;
+  let nearestDistance = Infinity;
+  for (const target of targets) {
+    const distance = horizontalDistance(bot.position, target.state.position);
+    if (distance < nearestDistance) {
+      nearest = target;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+function horizontalDistance(a, b) {
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+function directionTo(from, to) {
+  const dx = to.x - from.x;
+  const dy = (to.y ?? 1.72) - (from.y ?? 1.72);
+  const dz = to.z - from.z;
+  const length = Math.hypot(dx, dy, dz) || 1;
+  return {
+    x: dx / length,
+    y: dy / length,
+    z: dz / length,
+  };
+}
+
+function yawToward(dx, dz) {
+  if (Math.hypot(dx, dz) <= 0.001) return 0;
+  return Math.atan2(-dx, -dz);
+}
+
+function randomFlatDirection() {
+  const angle = Math.random() * Math.PI * 2;
+  return {
+    x: Math.cos(angle),
+    z: Math.sin(angle),
+  };
+}
+
+function clampBotPosition(bot) {
+  bot.position.x = Math.min(47, Math.max(-47, bot.position.x));
+  bot.position.z = Math.min(47, Math.max(-47, bot.position.z));
+}
+
 function sanitizeState(state) {
   return {
     classId: stringValue(state.classId, "fighter", 20),
@@ -296,6 +633,7 @@ function sanitizeState(state) {
     shield: booleanValue(state.shield),
     chargingShot: booleanValue(state.chargingShot),
     dead: booleanValue(state.dead),
+    ready: booleanValue(state.ready),
     position: {
       x: numberValue(state.position?.x, -60, 60),
       y: numberValue(state.position?.y, 0, 20),
