@@ -18,6 +18,8 @@ const heartbeatIntervalMs = 15000;
 const botTickMs = 50;
 const botBroadcastMs = 100;
 const botsPerRoom = 2;
+const matchKillLimit = 20;
+const matchResetDelayMs = 5500;
 
 const botClasses = ["fighter", "ranger"];
 const classStats = {
@@ -236,7 +238,10 @@ function removeClient(id) {
   const client = clients.get(id);
   if (!client) return;
   clients.delete(id);
+  const roomState = rooms.get(client.room);
+  roomState?.scores.delete(id);
   broadcast(client.room, { type: "peer-left", id }, id);
+  if (roomState) broadcastScoreboard(roomState);
   if (clientsForRoom(client.room).length === 0) {
     rooms.delete(client.room);
   }
@@ -263,6 +268,7 @@ wss.on("connection", (ws, request) => {
     id,
     room,
     peers: peersFor(room, id),
+    scoreboard: scoreboardMessage(roomState),
   });
 
   broadcast(room, { type: "peer-joined", id }, id);
@@ -286,7 +292,10 @@ wss.on("connection", (ws, request) => {
 
     if (message.type === "state" && message.state) {
       client.state = sanitizeState(message.state);
+      const scoreboardChanged = updateClientScoreRow(roomState, client);
+      applyScoreToClientState(roomState, client);
       broadcast(room, { type: "peer-state", id, state: client.state }, id);
+      if (scoreboardChanged) broadcastScoreboard(roomState);
       return;
     }
 
@@ -312,11 +321,7 @@ wss.on("connection", (ws, request) => {
 
     if (message.type === "death" && message.death) {
       const death = sanitizeDeath(message.death);
-      const killerBot = roomState.bots.get(death.killerId);
-      if (killerBot) {
-        killerBot.score += 1;
-        broadcast(roomState.name, { type: "peer-state", id: killerBot.id, state: botState(killerBot) });
-      }
+      recordKill(roomState, death.killerId, id, death.label);
       broadcast(room, { type: "peer-death", id, death }, id);
     }
   });
@@ -337,6 +342,14 @@ function getRoom(name) {
     room = {
       name,
       bots: new Map(),
+      scores: new Map(),
+      match: {
+        status: "playing",
+        limit: matchKillLimit,
+        winnerId: null,
+        winnerName: "",
+        resetAt: 0,
+      },
       botSeed: crypto.randomUUID().slice(0, 8),
       nextBotSlot: 0,
       lastTickAt: Date.now(),
@@ -375,6 +388,12 @@ function ensureRoomBots(room) {
       nextWander: 0.8 + Math.random() * 1.6,
     };
     room.bots.set(bot.id, bot);
+    ensureScoreRow(room, bot.id, {
+      name: `Bot ${bot.slot + 1}`,
+      classId: bot.classId,
+      bot: true,
+      ready: true,
+    });
     broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
   }
 }
@@ -392,6 +411,11 @@ function updateRooms() {
 
     const dt = Math.min(0.1, Math.max(0.001, (now - room.lastTickAt) / 1000));
     room.lastTickAt = now;
+    if (room.match.status === "ended") {
+      if (now >= room.match.resetAt) resetRoomMatch(room);
+      continue;
+    }
+
     const targets = roomClients.filter((client) => isClientAlive(client));
 
     for (const bot of room.bots.values()) {
@@ -500,7 +524,7 @@ function damageBot(room, bot, attackerId, hit) {
 
   if (bot.hp <= 0) {
     bot.dead = true;
-    bot.deaths += 1;
+    recordKill(room, attackerId, bot.id, hit.label || "Defeated");
     bot.respawn = 2.1;
     broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
     broadcast(room.name, {
@@ -544,6 +568,168 @@ function respawnBot(bot) {
   bot.wander = randomFlatDirection();
   bot.nextWander = 0.8 + Math.random() * 1.8;
   clampBotPosition(bot);
+}
+
+function ensureScoreRow(room, id, defaults = {}) {
+  let row = room.scores.get(id);
+  if (!row) {
+    row = {
+      id,
+      name: defaults.name || (defaults.bot ? "Bot" : `Player ${String(id).slice(0, 4)}`),
+      classId: defaults.classId || "fighter",
+      bot: Boolean(defaults.bot),
+      score: 0,
+      deaths: 0,
+      ready: defaults.ready !== false,
+      dead: false,
+    };
+    room.scores.set(id, row);
+  }
+  return row;
+}
+
+function updateClientScoreRow(room, client) {
+  const row = ensureScoreRow(room, client.id, { bot: false });
+  const next = {
+    name: client.state.name || row.name,
+    classId: client.state.classId || row.classId,
+    ready: Boolean(client.state.ready),
+    dead: Boolean(client.state.dead),
+  };
+  const changed =
+    row.name !== next.name ||
+    row.classId !== next.classId ||
+    row.ready !== next.ready ||
+    row.dead !== next.dead;
+  Object.assign(row, next, { bot: false });
+  return changed;
+}
+
+function applyScoreToClientState(room, client) {
+  const row = ensureScoreRow(room, client.id, { bot: false });
+  client.state.score = row.score;
+  client.state.deaths = row.deaths;
+}
+
+function recordKill(room, killerId, victimId, label = "Elimination") {
+  if (!killerId || room.match.status !== "playing") return;
+  const killerIsBot = room.bots.has(killerId);
+  const victimIsBot = room.bots.has(victimId);
+  const killer = ensureScoreRow(room, killerId, {
+    bot: killerIsBot,
+    name: killerIsBot ? `Bot ${room.bots.get(killerId).slot + 1}` : undefined,
+    classId: killerIsBot ? room.bots.get(killerId).classId : undefined,
+  });
+  const victim = ensureScoreRow(room, victimId, {
+    bot: victimIsBot,
+    name: victimIsBot ? `Bot ${room.bots.get(victimId).slot + 1}` : undefined,
+    classId: victimIsBot ? room.bots.get(victimId).classId : undefined,
+  });
+
+  if (killerId !== victimId) killer.score += 1;
+  victim.deaths += 1;
+  victim.dead = true;
+
+  syncBotScore(room, killerId);
+  syncBotScore(room, victimId);
+  syncClientScore(room, killerId);
+  syncClientScore(room, victimId);
+  broadcastScoreboard(room);
+
+  if (killer.score >= room.match.limit) {
+    finishMatch(room, killer, label);
+  }
+}
+
+function syncBotScore(room, id) {
+  const bot = room.bots.get(id);
+  const row = room.scores.get(id);
+  if (!bot || !row) return;
+  bot.score = row.score;
+  bot.deaths = row.deaths;
+  broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
+}
+
+function syncClientScore(room, id) {
+  const client = clients.get(id);
+  if (!client || client.room !== room.name || !client.state) return;
+  applyScoreToClientState(room, client);
+  broadcast(room.name, { type: "peer-state", id, state: client.state }, id);
+}
+
+function finishMatch(room, winner, label) {
+  room.match.status = "ended";
+  room.match.winnerId = winner.id;
+  room.match.winnerName = winner.name;
+  room.match.resetAt = Date.now() + matchResetDelayMs;
+  broadcast(room.name, {
+    type: "match-over",
+    winnerId: winner.id,
+    winnerName: winner.name,
+    limit: room.match.limit,
+    label,
+    resetAt: room.match.resetAt,
+  });
+  broadcastScoreboard(room);
+}
+
+function resetRoomMatch(room) {
+  room.match.status = "playing";
+  room.match.winnerId = null;
+  room.match.winnerName = "";
+  room.match.resetAt = 0;
+
+  for (const row of room.scores.values()) {
+    row.score = 0;
+    row.deaths = 0;
+    row.dead = false;
+  }
+
+  for (const bot of room.bots.values()) {
+    respawnBot(bot);
+    syncBotScore(room, bot.id);
+  }
+
+  for (const client of clientsForRoom(room.name)) {
+    if (!client.state) continue;
+    client.state.hp = client.state.maxHp;
+    client.state.dead = false;
+    applyScoreToClientState(room, client);
+    send(client.ws, { type: "match-reset", limit: room.match.limit });
+    send(client.ws, { type: "peer-state", id: client.id, state: client.state });
+    broadcast(room.name, { type: "peer-state", id: client.id, state: client.state }, client.id);
+  }
+
+  broadcastScoreboard(room);
+}
+
+function scoreboardMessage(room) {
+  for (const client of clientsForRoom(room.name)) {
+    if (client.state) updateClientScoreRow(room, client);
+  }
+  for (const bot of room.bots.values()) {
+    const row = ensureScoreRow(room, bot.id, {
+      name: `Bot ${bot.slot + 1}`,
+      classId: bot.classId,
+      bot: true,
+      ready: true,
+    });
+    row.dead = bot.dead;
+  }
+
+  return {
+    type: "scoreboard",
+    status: room.match.status,
+    limit: room.match.limit,
+    winnerId: room.match.winnerId,
+    winnerName: room.match.winnerName,
+    resetAt: room.match.resetAt,
+    entries: [...room.scores.values()].map((row) => ({ ...row })),
+  };
+}
+
+function broadcastScoreboard(room) {
+  broadcast(room.name, scoreboardMessage(room));
 }
 
 function botState(bot) {
@@ -624,6 +810,7 @@ function clampBotPosition(bot) {
 
 function sanitizeState(state) {
   return {
+    name: stringValue(state.name, "Player", 18),
     classId: stringValue(state.classId, "fighter", 20),
     hp: numberValue(state.hp, 0, 300),
     maxHp: numberValue(state.maxHp, 1, 300),

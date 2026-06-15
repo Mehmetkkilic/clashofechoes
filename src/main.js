@@ -29,6 +29,8 @@ const upAxis = new THREE.Vector3(0, 1, 0);
 const ui = {
   app: document.querySelector("#app"),
   lockPanel: document.querySelector("#lock-panel"),
+  enterArena: document.querySelector("#enter-arena"),
+  nickInput: document.querySelector("#nick-input"),
   hpBar: document.querySelector("#hp-bar"),
   hpText: document.querySelector("#hp-text"),
   className: document.querySelector("#class-name"),
@@ -42,6 +44,12 @@ const ui = {
   mpStatus: document.querySelector("#mp-status"),
   mpRoom: document.querySelector("#mp-room"),
   mpHud: document.querySelector(".multiplayer-hud"),
+  scoreboard: document.querySelector("#scoreboard"),
+  scoreboardList: document.querySelector("#scoreboard-list"),
+  scoreboardLimit: document.querySelector("#scoreboard-limit"),
+  matchBanner: document.querySelector("#match-banner"),
+  matchBannerTitle: document.querySelector("#match-banner-title"),
+  matchBannerDetail: document.querySelector("#match-banner-detail"),
   classButtons: Array.from(document.querySelectorAll(".class-button")),
   abilityCards: Array.from(document.querySelectorAll(".ability")),
   abilityNames: {
@@ -122,7 +130,13 @@ const input = {
   right: false,
   sprint: false,
   jump: false,
+  scoreboard: false,
 };
+
+const PLAYER_EYE_HEIGHT = 1.72;
+const PLAYER_RADIUS = 0.55;
+const PLAYER_STEP_HEIGHT = 0.82;
+const MATCH_KILL_LIMIT = 20;
 
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const audioState = {
@@ -160,8 +174,9 @@ const AUDIO_SAMPLES = {
 };
 
 const player = {
+  name: "Player",
   classId: "fighter",
-  position: new THREE.Vector3(0, 1.72, 18),
+  position: new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18),
   velocity: new THREE.Vector3(),
   hp: CLASS_DATA.fighter.hp,
   maxHp: CLASS_DATA.fighter.hp,
@@ -185,6 +200,17 @@ const blockers = [];
 const floatingMessages = [];
 const torches = [];
 const remotePlayers = new Map();
+const worldColliders = [];
+const walkSurfaces = [];
+
+const matchState = {
+  limit: MATCH_KILL_LIMIT,
+  status: "playing",
+  winnerId: null,
+  winnerName: "",
+  resetAt: 0,
+  entries: [],
+};
 
 const multiplayer = {
   socket: null,
@@ -279,6 +305,7 @@ function init() {
   setupPlayerWeapon();
   spawnEnemies();
   bindEvents();
+  setupPlayerName();
   exposeDebugState();
   initMultiplayer();
   selectClass("fighter");
@@ -382,6 +409,29 @@ function finishAudioUnlock() {
       addFeed("Sound enabled", "Audio");
     }
   }
+}
+
+function setupPlayerName() {
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("nick") || params.get("name") || localStorage.getItem("clash-player-name");
+  player.name = sanitizePlayerName(requested || `Player ${Math.floor(100 + Math.random() * 900)}`);
+  ui.nickInput.value = player.name;
+}
+
+function commitPlayerName() {
+  player.name = sanitizePlayerName(ui.nickInput.value || player.name);
+  ui.nickInput.value = player.name;
+  localStorage.setItem("clash-player-name", player.name);
+  sendMultiplayerState(true);
+}
+
+function sanitizePlayerName(value) {
+  const clean = String(value || "")
+    .replace(/[^\w .-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 18);
+  return clean || "Player";
 }
 
 function startAmbience() {
@@ -745,6 +795,7 @@ function connectMultiplayer() {
       multiplayer.room = message.room || multiplayer.room;
       multiplayer.reconnectDelay = 1500;
       setMultiplayerStatus("online", "MP Online", `room ${multiplayer.room}`);
+      if (message.scoreboard) applyScoreboard(message.scoreboard);
       for (const peer of message.peers || []) {
         updateRemotePlayer(peer.id, peer.state);
       }
@@ -765,6 +816,22 @@ function connectMultiplayer() {
 
     if (message.type === "peer-death") {
       handlePeerDeath(message.id, message.death);
+    }
+
+    if (message.type === "scoreboard") {
+      applyScoreboard(message);
+    }
+
+    if (message.type === "match-over") {
+      matchState.status = "ended";
+      matchState.winnerId = message.winnerId || null;
+      matchState.winnerName = message.winnerName || "";
+      matchState.resetAt = Number(message.resetAt) || 0;
+      showMatchBanner(message.winnerName || "Winner", `First to ${message.limit || matchState.limit}. Restarting soon.`);
+    }
+
+    if (message.type === "match-reset") {
+      handleMatchReset();
     }
 
     if (message.type === "pong") {
@@ -845,6 +912,7 @@ function sendMultiplayerState(force = false) {
     JSON.stringify({
       type: "state",
       state: {
+        name: player.name,
         classId: player.classId,
         hp: player.hp,
         maxHp: player.maxHp,
@@ -937,7 +1005,7 @@ function spawnRemoteAttackEffect(remote, attack) {
   const label = attack.label || "Attack";
   const origin = attack.position
     ? new THREE.Vector3(attack.position.x, attack.position.y, attack.position.z)
-    : remote.group.position.clone().add(new THREE.Vector3(0, 1.72, 0));
+    : remote.group.position.clone().add(new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 0));
   const target = getAttackTarget(attack);
   const direction = getAttackDirection(attack);
 
@@ -1123,7 +1191,7 @@ function applyPeerDamage(attackerId, hit = {}) {
     const knockDir = player.position.clone().sub(attacker.group.position);
     knockDir.y = 0;
     if ((hit.knock ?? 0) > 0 && knockDir.lengthSq() > 0.01) {
-      player.position.addScaledVector(knockDir.normalize(), Math.min(1.6, hit.knock * 0.06));
+      movePlayerByVector(knockDir.normalize().multiplyScalar(Math.min(1.6, hit.knock * 0.06)));
     }
   }
 
@@ -1150,16 +1218,86 @@ function handlePeerDeath(victimId, death = {}) {
   const victimLabel = victim?.isBot ? victim.state?.name || "Bot" : "Player";
 
   if (death.killerId === multiplayer.id) {
-    player.score += 1;
     playSound("kill");
     addFeed(`${victimLabel} down`, death.label || "Elimination");
-    sendMultiplayerState(true);
     return;
   }
 
   if (victim) {
     addFeed(`${victimLabel} down`, death.label || "Elimination");
   }
+}
+
+function applyScoreboard(message = {}) {
+  matchState.limit = Number(message.limit) || MATCH_KILL_LIMIT;
+  matchState.status = message.status || "playing";
+  matchState.winnerId = message.winnerId || null;
+  matchState.winnerName = message.winnerName || "";
+  matchState.resetAt = Number(message.resetAt) || 0;
+  matchState.entries = Array.isArray(message.entries) ? message.entries : [];
+
+  const mine = matchState.entries.find((entry) => entry.id === multiplayer.id);
+  if (mine) {
+    player.score = Number(mine.score) || 0;
+    player.deaths = Number(mine.deaths) || 0;
+  }
+
+  if (matchState.status === "playing") {
+    ui.matchBanner.classList.add("hidden");
+  }
+
+  updateScoreboardHud();
+}
+
+function updateScoreboardHud() {
+  if (!ui.scoreboardList) return;
+  ui.scoreboard.classList.toggle("hidden", !input.scoreboard);
+  ui.scoreboardLimit.textContent = `${matchState.limit} kills`;
+
+  const entries = [...matchState.entries].sort((a, b) => {
+    const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+    if (scoreDiff !== 0) return scoreDiff;
+    return (Number(a.deaths) || 0) - (Number(b.deaths) || 0);
+  });
+
+  ui.scoreboardList.replaceChildren(
+    ...entries.map((entry, index) => {
+      const row = document.createElement("div");
+      row.className = "scoreboard-row";
+      row.classList.toggle("local", entry.id === multiplayer.id);
+      const status = entry.dead ? "Down" : entry.ready === false ? "Lobby" : "Alive";
+      row.innerHTML = `
+        <div class="scoreboard-name">
+          <strong>${escapeHtml(entry.name || (entry.bot ? "Bot" : `Player ${index + 1}`))}</strong>
+          <span>${escapeHtml(CLASS_DATA[entry.classId]?.name || "Fighter")}${entry.bot ? " Bot" : ""}</span>
+        </div>
+        <div class="scoreboard-stat"><strong>${Number(entry.score) || 0}</strong><span>K</span></div>
+        <div class="scoreboard-stat"><strong>${Number(entry.deaths) || 0}</strong><span>D</span></div>
+        <div class="scoreboard-status">${status}</div>
+      `;
+      return row;
+    })
+  );
+}
+
+function showMatchBanner(title, detail) {
+  ui.matchBannerTitle.textContent = title;
+  ui.matchBannerDetail.textContent = detail;
+  ui.matchBanner.classList.remove("hidden");
+}
+
+function handleMatchReset() {
+  matchState.status = "playing";
+  matchState.winnerId = null;
+  matchState.winnerName = "";
+  matchState.resetAt = 0;
+  player.score = 0;
+  player.deaths = 0;
+  respawnPlayer();
+  showMatchBanner("New Round", `First to ${matchState.limit} kills`);
+  setTimeout(() => {
+    if (matchState.status === "playing") ui.matchBanner.classList.add("hidden");
+  }, 1800);
 }
 
 function clearRemotePlayers() {
@@ -1340,6 +1478,8 @@ function applyLightingSettings() {
 }
 
 function setupArena() {
+  addWalkRect(0, 0, 108, 108, 0);
+
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(108, 108, 12, 12), materials.grass);
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -1371,6 +1511,7 @@ function addWall(x, z, w, d, h) {
   wall.castShadow = true;
   wall.receiveShadow = true;
   scene.add(wall);
+  addBoxCollider(x, z, w, d, 0, h);
 }
 
 function addGate(x, z) {
@@ -1379,6 +1520,8 @@ function addGate(x, z) {
   left.position.set(x - 15, 4, z);
   right.position.set(x + 15, 4, z);
   scene.add(left, right);
+  addBoxCollider(x - 15, z, 14, 6, 0, 8);
+  addBoxCollider(x + 15, z, 14, 6, 0, 8);
 
   const arch = new THREE.Mesh(new THREE.BoxGeometry(18, 5, 6.2), materials.darkStone);
   arch.position.set(x, 10, z);
@@ -1401,6 +1544,7 @@ function addTowers() {
     tower.castShadow = true;
     tower.receiveShadow = true;
     scene.add(tower);
+    addCircleCollider(x, z, 7.2, 0, 16);
 
     const top = new THREE.Mesh(new THREE.CylinderGeometry(7.6, 7.6, 1.2, 8), materials.stone);
     top.position.set(x, 16.7, z);
@@ -1435,6 +1579,7 @@ function addRuins() {
   centerObelisk.castShadow = true;
   centerObelisk.receiveShadow = true;
   scene.add(centerObelisk);
+  addCircleCollider(0, 0, 2.8, 0, 8.5);
 }
 
 function addArcherPlatforms() {
@@ -1449,6 +1594,7 @@ function addArcherPlatforms() {
     platform.castShadow = true;
     platform.receiveShadow = true;
     scene.add(platform);
+    addWalkRect(x, z, w, d, 7);
 
     addRamp(x, z + d / 2 + 5, w * 0.75, 10, platformMat, z > 0 ? -1 : 1);
   });
@@ -1461,6 +1607,7 @@ function addRamp(x, z, w, d, material, direction) {
   ramp.castShadow = true;
   ramp.receiveShadow = true;
   scene.add(ramp);
+  addRampSurface(x, z, w, d, 0, 7, direction);
 }
 
 function addTunnel() {
@@ -1499,6 +1646,7 @@ function addProps() {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    addBoxCollider(x, z, index % 2 ? 1.9 : 1.8, index % 2 ? 1.9 : 1.8, 0, index % 2 ? 1.9 : 1.6);
   });
 }
 
@@ -1509,7 +1657,55 @@ function addBlock(x, z, w, d, h, y, material) {
   block.castShadow = true;
   block.receiveShadow = true;
   scene.add(block);
+  if (y - h / 2 <= 0.2) addBoxCollider(x, z, w, d, 0, h);
   return block;
+}
+
+function addBoxCollider(x, z, w, d, minY, maxY) {
+  worldColliders.push({
+    type: "box",
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2,
+    minY,
+    maxY,
+  });
+}
+
+function addCircleCollider(x, z, radius, minY, maxY) {
+  worldColliders.push({
+    type: "circle",
+    x,
+    z,
+    radius,
+    minY,
+    maxY,
+  });
+}
+
+function addWalkRect(x, z, w, d, height) {
+  walkSurfaces.push({
+    type: "rect",
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2,
+    height,
+  });
+}
+
+function addRampSurface(x, z, w, d, lowHeight, highHeight, direction) {
+  walkSurfaces.push({
+    type: "ramp",
+    minX: x - w / 2,
+    maxX: x + w / 2,
+    minZ: z - d / 2,
+    maxZ: z + d / 2,
+    lowHeight,
+    highHeight,
+    highAtMinZ: direction >= 0,
+  });
 }
 
 function setupPlayerWeapon() {
@@ -1696,6 +1892,9 @@ function createRemotePlayer(id, state) {
   barGroup.add(back, fill);
   group.add(barGroup);
 
+  const nameSprite = createNameSprite(displayRemoteName(state, id), state.bot);
+  group.add(nameSprite);
+
   scene.add(group);
 
   return {
@@ -1703,7 +1902,9 @@ function createRemotePlayer(id, state) {
     group,
     body,
     weapon,
+    nameSprite,
     isBot: Boolean(state.bot),
+    displayName: displayRemoteName(state, id),
     classId: state.classId,
     healthFill: fill,
     target: new THREE.Vector3(),
@@ -1723,7 +1924,11 @@ function updateRemotePlayer(id, state) {
 
   remote.state = state;
   remote.isBot = Boolean(state.bot);
-  remote.target.set(state.position.x, state.position.y - 1.72, state.position.z);
+  const nextName = displayRemoteName(state, id);
+  if (remote.displayName !== nextName) {
+    updateNameSprite(remote, nextName);
+  }
+  remote.target.set(state.position.x, state.position.y - PLAYER_EYE_HEIGHT, state.position.z);
   if (remote.classId !== state.classId) {
     remote.group.remove(remote.weapon);
     remote.weapon = createRemoteWeapon(state.classId, classColor(state.classId));
@@ -1755,6 +1960,7 @@ function updateRemotePlayers(dt) {
       remote.weapon.position.x *= Math.pow(0.02, dt);
     }
     remote.healthFill.parent.quaternion.copy(camera.quaternion);
+    remote.nameSprite.quaternion.copy(camera.quaternion);
   }
 }
 
@@ -1804,6 +2010,68 @@ function createRemoteWeapon(classId, color) {
   return weapon;
 }
 
+function displayRemoteName(state, id) {
+  if (state?.name) return state.name;
+  if (state?.bot) return "Bot";
+  return `Player ${String(id).slice(0, 4)}`;
+}
+
+function createNameSprite(name, isBot = false) {
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: makeNameTexture(name, isBot),
+      transparent: true,
+      depthWrite: false,
+    })
+  );
+  sprite.position.y = 2.92;
+  sprite.scale.set(2.4, 0.62, 1);
+  return sprite;
+}
+
+function updateNameSprite(remote, name) {
+  remote.displayName = name;
+  const oldMap = remote.nameSprite.material.map;
+  remote.nameSprite.material.map = makeNameTexture(name, remote.isBot);
+  remote.nameSprite.material.needsUpdate = true;
+  oldMap?.dispose?.();
+}
+
+function makeNameTexture(name, isBot = false) {
+  const textureCanvas = document.createElement("canvas");
+  textureCanvas.width = 256;
+  textureCanvas.height = 64;
+  const context = textureCanvas.getContext("2d");
+  context.clearRect(0, 0, 256, 64);
+  context.fillStyle = isBot ? "rgba(31, 36, 34, 0.72)" : "rgba(12, 16, 16, 0.78)";
+  roundRect(context, 16, 12, 224, 40, 8);
+  context.fill();
+  context.strokeStyle = isBot ? "rgba(107, 211, 145, 0.46)" : "rgba(225, 181, 96, 0.55)";
+  context.stroke();
+  context.font = "800 22px system-ui";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillStyle = "#eef2f0";
+  context.fillText(String(name).slice(0, 18), 128, 33, 198);
+  const texture = new THREE.CanvasTexture(textureCanvas);
+  texture.minFilter = THREE.LinearFilter;
+  return texture;
+}
+
+function roundRect(context, x, y, width, height, radius) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+}
+
 function setObjectOpacity(object, opacity) {
   object.traverse((child) => {
     if (!child.material || typeof child.material.opacity !== "number") return;
@@ -1816,6 +2084,8 @@ function removeRemotePlayer(id) {
   const remote = remotePlayers.get(id);
   if (!remote) return;
   scene.remove(remote.group);
+  remote.nameSprite?.material?.map?.dispose?.();
+  remote.nameSprite?.material?.dispose?.();
   remotePlayers.delete(id);
   addFeed("Player left", "Multiplayer");
 }
@@ -1833,9 +2103,18 @@ function bindEvents() {
     requestArenaPointerLock();
   });
 
-  ui.lockPanel.addEventListener("click", () => {
+  ui.enterArena.addEventListener("click", () => {
     unlockAudio();
+    commitPlayerName();
     requestArenaPointerLock();
+  });
+
+  ui.nickInput.addEventListener("keydown", (event) => {
+    event.stopPropagation();
+    if (event.code === "Enter") {
+      event.preventDefault();
+      ui.enterArena.click();
+    }
   });
 
   ui.lightingButtons.forEach((button) => {
@@ -1855,7 +2134,9 @@ function bindEvents() {
     ui.lockPanel.classList.toggle("hidden", locked);
     if (locked && !matchStarted) {
       matchStarted = true;
+      commitPlayerName();
       addFeed("Match started", "Arena");
+      sendMultiplayerState(true);
     }
   });
 
@@ -1881,6 +2162,15 @@ function bindEvents() {
 
   window.addEventListener("keydown", (event) => {
     unlockAudio();
+    if (event.code === "Tab") {
+      event.preventDefault();
+      input.scoreboard = true;
+      updateScoreboardHud();
+      return;
+    }
+
+    if (document.activeElement === ui.nickInput) return;
+
     switch (event.code) {
       case "KeyW":
         input.forward = true;
@@ -1928,6 +2218,13 @@ function bindEvents() {
   });
 
   window.addEventListener("keyup", (event) => {
+    if (event.code === "Tab") {
+      event.preventDefault();
+      input.scoreboard = false;
+      updateScoreboardHud();
+      return;
+    }
+
     switch (event.code) {
       case "KeyW":
         input.forward = false;
@@ -2077,25 +2374,117 @@ function updatePlayer(dt) {
   player.velocity.z = wish.z * speed;
   updateFootsteps(dt, wish.lengthSq() > 0.01, input.sprint || player.chargeRush > 0);
 
-  if (input.jump && player.position.y <= 1.73) {
+  const currentFootY = player.position.y - PLAYER_EYE_HEIGHT;
+  const currentGroundY = getWalkHeight(player.position.x, player.position.z, currentFootY, PLAYER_STEP_HEIGHT);
+  const grounded = currentFootY <= currentGroundY + 0.08 && player.velocity.y <= 0.2;
+
+  if (input.jump && grounded) {
     player.velocity.y = 6.2;
   }
   input.jump = false;
 
   player.velocity.y -= 18 * dt;
-  player.position.addScaledVector(player.velocity, dt);
+  movePlayerWithCollision(dt, currentFootY, grounded);
+}
 
-  if (player.position.y < 1.72) {
-    player.position.y = 1.72;
+function movePlayerWithCollision(dt, startFootY, grounded) {
+  const dx = player.velocity.x * dt;
+  const dz = player.velocity.z * dt;
+
+  if (dx !== 0) {
+    const previousX = player.position.x;
+    player.position.x = clamp(player.position.x + dx, -47, 47);
+    if (collidesWithWorld(player.position)) {
+      player.position.x = previousX;
+      player.velocity.x = 0;
+    }
+  }
+
+  if (dz !== 0) {
+    const previousZ = player.position.z;
+    player.position.z = clamp(player.position.z + dz, -47, 47);
+    if (collidesWithWorld(player.position)) {
+      player.position.z = previousZ;
+      player.velocity.z = 0;
+    }
+  }
+
+  let footY = startFootY + player.velocity.y * dt;
+  const step = grounded ? PLAYER_STEP_HEIGHT : Math.max(PLAYER_STEP_HEIGHT, Math.abs(player.velocity.y * dt) + 0.1);
+  const groundY = getWalkHeight(player.position.x, player.position.z, startFootY, step);
+  const canSnapUp = grounded && groundY <= startFootY + PLAYER_STEP_HEIGHT;
+  const fallingOntoSurface = player.velocity.y <= 0 && startFootY >= groundY - 0.05;
+
+  if ((canSnapUp && player.velocity.y <= 0) || (fallingOntoSurface && footY <= groundY)) {
+    footY = groundY;
     player.velocity.y = 0;
   }
 
-  player.position.x = clamp(player.position.x, -47, 47);
-  player.position.z = clamp(player.position.z, -47, 47);
+  if (footY < 0) {
+    footY = 0;
+    player.velocity.y = 0;
+  }
+
+  player.position.y = footY + PLAYER_EYE_HEIGHT;
+}
+
+function movePlayerByVector(vector) {
+  const steps = Math.max(1, Math.ceil(vector.length() / 0.35));
+  const step = vector.clone().multiplyScalar(1 / steps);
+  for (let i = 0; i < steps; i++) {
+    const previousX = player.position.x;
+    player.position.x = clamp(player.position.x + step.x, -47, 47);
+    if (collidesWithWorld(player.position)) player.position.x = previousX;
+
+    const previousZ = player.position.z;
+    player.position.z = clamp(player.position.z + step.z, -47, 47);
+    if (collidesWithWorld(player.position)) player.position.z = previousZ;
+  }
+}
+
+function collidesWithWorld(position) {
+  const footY = position.y - PLAYER_EYE_HEIGHT;
+  const headY = position.y;
+  for (const collider of worldColliders) {
+    if (headY < collider.minY || footY > collider.maxY) continue;
+    if (collider.type === "box") {
+      if (
+        position.x > collider.minX - PLAYER_RADIUS &&
+        position.x < collider.maxX + PLAYER_RADIUS &&
+        position.z > collider.minZ - PLAYER_RADIUS &&
+        position.z < collider.maxZ + PLAYER_RADIUS
+      ) {
+        return true;
+      }
+    } else if (collider.type === "circle") {
+      const distance = horizontalDistance(position, collider);
+      if (distance < collider.radius + PLAYER_RADIUS) return true;
+    }
+  }
+
+  return false;
+}
+
+function getWalkHeight(x, z, referenceFootY = 0, stepHeight = PLAYER_STEP_HEIGHT) {
+  let best = 0;
+  for (const surface of walkSurfaces) {
+    if (x < surface.minX || x > surface.maxX || z < surface.minZ || z > surface.maxZ) continue;
+    const height = surface.type === "ramp" ? rampHeightAt(surface, z) : surface.height;
+    if (height <= referenceFootY + stepHeight && height > best) best = height;
+  }
+  return best;
+}
+
+function rampHeightAt(surface, z) {
+  const t = clamp((z - surface.minZ) / Math.max(0.001, surface.maxZ - surface.minZ), 0, 1);
+  const highT = surface.highAtMinZ ? 1 - t : t;
+  return surface.lowHeight + (surface.highHeight - surface.lowHeight) * highT;
 }
 
 function updateFootsteps(dt, moving, fast) {
-  if (!moving || player.position.y > 1.73) {
+  const footY = player.position.y - PLAYER_EYE_HEIGHT;
+  const groundY = getWalkHeight(player.position.x, player.position.z, footY, PLAYER_STEP_HEIGHT);
+  if (!moving || footY > groundY + 0.08) {
     footstepTimer = Math.min(footstepTimer, 0.08);
     return;
   }
@@ -2337,7 +2726,7 @@ function updateFloatingMessages(dt) {
 }
 
 function usePrimary() {
-  if (player.deadTimer > 0 || cooldowns.primary > 0) return;
+  if (player.deadTimer > 0 || cooldowns.primary > 0 || matchState.status === "ended") return;
   const classId = player.classId;
 
   if (classId === "fighter") {
@@ -2399,7 +2788,7 @@ function usePrimary() {
 }
 
 function useSecondaryDown() {
-  if (player.deadTimer > 0) return;
+  if (player.deadTimer > 0 || matchState.status === "ended") return;
   if (player.classId === "fighter") {
     player.shield = true;
     playSound("shield-up");
@@ -2476,7 +2865,7 @@ function useSecondaryUp() {
 }
 
 function useAbility(slot) {
-  if (player.deadTimer > 0 || cooldowns[slot] > 0) return;
+  if (player.deadTimer > 0 || cooldowns[slot] > 0 || matchState.status === "ended") return;
   const classId = player.classId;
 
   if (classId === "fighter") useFighterAbility(slot);
@@ -2590,9 +2979,7 @@ function useRangerAbility(slot) {
     const right = getFlatRight();
     const forward = getFlatForward();
     const direction = input.left ? right.multiplyScalar(-1) : input.right ? right : forward.multiplyScalar(-1);
-    player.position.addScaledVector(direction, 5.2);
-    player.position.x = clamp(player.position.x, -47, 47);
-    player.position.z = clamp(player.position.z, -47, 47);
+    movePlayerByVector(direction.multiplyScalar(5.2));
     makeGroundRing(player.position, 2.1, 0x7fcf79, 0.35);
   }
 
@@ -2893,7 +3280,7 @@ function damagePlayer(amount, enemy) {
 }
 
 function respawnPlayer() {
-  player.position.set(0, 1.72, 18);
+  player.position.set(0, PLAYER_EYE_HEIGHT, 18);
   player.velocity.set(0, 0, 0);
   player.hp = player.maxHp;
   player.invulnerable = 1.2;
@@ -3267,6 +3654,14 @@ function addFeed(message, type) {
   ui.feed.prepend(item);
   while (ui.feed.children.length > 4) ui.feed.lastElementChild.remove();
   setTimeout(() => item.remove(), 4200);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function updateHud() {

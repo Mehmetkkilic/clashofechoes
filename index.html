@@ -11,6 +11,10 @@
 
       <div class="reticle" aria-hidden="true"></div>
       <div id="hit-vignette" class="hit-vignette" aria-hidden="true"></div>
+      <div id="match-banner" class="match-banner hidden" aria-live="polite">
+        <strong id="match-banner-title">Match Over</strong>
+        <span id="match-banner-detail">Restarting</span>
+      </div>
 
       <section class="hud top-hud" aria-label="Match status">
         <div>
@@ -105,10 +109,23 @@
 
       <section id="status-feed" class="hud status-feed" aria-label="Combat feed"></section>
 
-      <button id="lock-panel" class="lock-panel">
+      <section id="scoreboard" class="hud scoreboard hidden" aria-label="Scoreboard">
+        <div class="scoreboard-top">
+          <strong>Scoreboard</strong>
+          <span id="scoreboard-limit">20 kills</span>
+        </div>
+        <div id="scoreboard-list" class="scoreboard-list"></div>
+      </section>
+
+      <section id="lock-panel" class="lock-panel" aria-label="Join match">
         <strong>Enter Arena</strong>
+        <label class="nick-field">
+          <span>Nick</span>
+          <input id="nick-input" type="text" maxlength="18" autocomplete="nickname" />
+        </label>
+        <button id="enter-arena" type="button">Join</button>
         <span>Prototype build</span>
-      </button>
+      </section>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>
