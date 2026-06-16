@@ -25,8 +25,8 @@ const botClasses = ["fighter", "ranger"];
 const classStats = {
   fighter: { hp: 150, speed: 4.8, color: 0xe0a34f },
   priest: { hp: 100, speed: 5.0, color: 0xf26f45 },
-  ranger: { hp: 100, speed: 5.4, color: 0x7fcf79 },
-  witch: { hp: 90, speed: 5.1, color: 0xb77ce8 },
+  ranger: { hp: 100, speed: 5.4, color: 0x5cc9e6 },
+  witch: { hp: 90, speed: 5.1, color: 0x8fdc3c },
 };
 
 const botSpawnPoints = [

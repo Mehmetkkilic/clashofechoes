@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Riftbound Arena - Combat Demo</title>
   </head>
   <body>
@@ -52,20 +55,20 @@
 
       <section class="hud class-hud" aria-label="Class selection">
         <button class="class-button active" data-class="fighter">
-          <span>Fighter</span>
-          <small>150 HP</small>
+          <img class="class-portrait" src="/portraits/fighter.jpg" alt="" />
+          <span class="class-label"><strong>Fighter</strong><small>150 HP</small></span>
         </button>
         <button class="class-button" data-class="priest">
-          <span>Priest</span>
-          <small>100 HP</small>
+          <span class="class-portrait class-portrait--placeholder" data-class="priest" aria-hidden="true"></span>
+          <span class="class-label"><strong>Priest</strong><small>100 HP</small></span>
         </button>
         <button class="class-button" data-class="ranger">
-          <span>Ranger</span>
-          <small>100 HP</small>
+          <img class="class-portrait" src="/portraits/ranger.jpg" alt="" />
+          <span class="class-label"><strong>Ranger</strong><small>100 HP</small></span>
         </button>
         <button class="class-button" data-class="witch">
-          <span>Witch</span>
-          <small>90 HP</small>
+          <img class="class-portrait" src="/portraits/witch.jpg" alt="" />
+          <span class="class-label"><strong>Witch</strong><small>90 HP</small></span>
         </button>
       </section>
 
@@ -115,6 +118,59 @@
           <span id="scoreboard-limit">20 kills</span>
         </div>
         <div id="scoreboard-list" class="scoreboard-list"></div>
+      </section>
+
+      <div id="mobile-look" class="mobile-look" aria-hidden="true">
+        <div class="look-zone"></div>
+        <div class="joystick-zone">
+          <div class="joystick-base">
+            <div class="joystick-knob"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="mobile-actions" class="mobile-actions" aria-hidden="true">
+        <button class="mobile-btn mobile-sprint" data-action="sprint" type="button">»</button>
+        <div class="action-cluster">
+          <button class="mobile-btn ab" data-action="q" data-slot="q" type="button">
+            <span class="mb-label">Q</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab" data-action="e" data-slot="e" type="button">
+            <span class="mb-label">E</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab" data-action="r" data-slot="r" type="button">
+            <span class="mb-label">R</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn special" data-action="secondary" data-slot="secondary" type="button">
+            <span class="mb-label">⛨</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn jump" data-action="jump" type="button">⤒</button>
+          <button class="mobile-btn attack" data-action="primary" data-slot="primary" type="button">
+            <span class="mb-label">⚔</span><span class="mb-cd"></span>
+          </button>
+        </div>
+      </div>
+
+      <section id="upgrade-modal" class="upgrade-modal hidden" aria-label="Choose upgrade">
+        <strong class="upgrade-title">Güçlen — bir yükseltme seç</strong>
+        <div class="upgrade-cards">
+          <button class="upgrade-card" type="button" data-index="0">
+            <kbd>1</kbd>
+            <span class="upgrade-name"></span>
+            <small class="upgrade-desc"></small>
+          </button>
+          <button class="upgrade-card" type="button" data-index="1">
+            <kbd>2</kbd>
+            <span class="upgrade-name"></span>
+            <small class="upgrade-desc"></small>
+          </button>
+          <button class="upgrade-card" type="button" data-index="2">
+            <kbd>3</kbd>
+            <span class="upgrade-name"></span>
+            <small class="upgrade-desc"></small>
+          </button>
+        </div>
+        <span class="upgrade-hint">1 · 2 · 3 ile seç</span>
       </section>
 
       <section id="lock-panel" class="lock-panel" aria-label="Join match">

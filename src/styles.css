@@ -227,13 +227,14 @@ h1 {
 .class-button {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 42px;
-  padding: 8px 10px;
+  gap: 10px;
+  min-height: 52px;
+  padding: 7px 9px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
   cursor: pointer;
+  text-align: left;
 }
 
 .class-button:hover,
@@ -247,8 +248,35 @@ h1 {
   background: rgba(225, 181, 96, 0.16);
 }
 
-.class-button span {
+.class-portrait {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  object-fit: cover;
+  object-position: top center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.class-portrait--placeholder {
+  display: block;
+  background: linear-gradient(150deg, #f26f45, #7a2f1c);
+}
+
+.class-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.class-label strong {
   font-weight: 800;
+}
+
+.class-label small {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .health-hud {
@@ -610,6 +638,102 @@ h1 {
   opacity: 1;
 }
 
+.upgrade-modal {
+  position: fixed;
+  z-index: 6;
+  top: 38%;
+  left: 50%;
+  display: grid;
+  gap: 14px;
+  width: min(640px, calc(100vw - 36px));
+  padding: 18px;
+  border: 1px solid rgba(225, 181, 96, 0.55);
+  border-radius: 10px;
+  background: var(--panel-strong);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.upgrade-modal .upgrade-card {
+  pointer-events: auto;
+}
+
+.upgrade-modal.hidden {
+  display: none;
+}
+
+.upgrade-title {
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.upgrade-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.upgrade-card {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  align-content: start;
+  min-height: 124px;
+  padding: 14px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    transform 0.12s ease;
+}
+
+.upgrade-card:hover,
+.upgrade-card:focus-visible {
+  border-color: rgba(225, 181, 96, 0.78);
+  background: rgba(225, 181, 96, 0.14);
+  outline: 0;
+  transform: translateY(-2px);
+}
+
+.upgrade-card kbd {
+  display: inline-flex;
+  min-width: 30px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(225, 181, 96, 0.6);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.upgrade-name {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.upgrade-desc {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.upgrade-hint {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 760px) {
   .top-hud {
     top: 10px;
@@ -695,4 +819,170 @@ h1 {
   .health-hud {
     bottom: 208px;
   }
+}
+
+/* ---- Mobile / touch controls ---- */
+body.touch {
+  touch-action: none;
+  overscroll-behavior: none;
+}
+
+.touch #game {
+  touch-action: none;
+}
+
+/* Declutter the desktop HUD on touch devices. */
+.touch .lighting-hud,
+.touch .ability-hud {
+  display: none;
+}
+
+.touch .top-hud,
+.touch .health-hud,
+.touch .multiplayer-hud,
+.touch .status-feed {
+  pointer-events: none;
+}
+
+.touch .health-hud {
+  bottom: auto;
+  top: 64px;
+}
+
+.mobile-look,
+.mobile-actions {
+  display: none;
+}
+
+body.touch.playing .mobile-look,
+body.touch.playing .mobile-actions {
+  display: block;
+}
+
+.mobile-look {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.mobile-look .look-zone {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mobile-look .joystick-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 48%;
+  height: 56%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mobile-look .joystick-base {
+  position: fixed;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  border: 2px solid rgba(225, 181, 96, 0.5);
+  background: rgba(12, 16, 16, 0.35);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.mobile-look .joystick-base.visible {
+  opacity: 1;
+}
+
+.mobile-look .joystick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(225, 181, 96, 0.55);
+  transform: translate(-50%, -50%);
+}
+
+.mobile-actions {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.mobile-btn {
+  pointer-events: auto;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: rgba(17, 22, 23, 0.7);
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 800;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  backdrop-filter: blur(6px);
+}
+
+.mobile-btn:active {
+  border-color: rgba(225, 181, 96, 0.9);
+  background: rgba(225, 181, 96, 0.28);
+}
+
+.mobile-btn.cooling {
+  opacity: 0.5;
+}
+
+.mobile-btn.active {
+  border-color: rgba(107, 211, 145, 0.8);
+  background: rgba(107, 211, 145, 0.22);
+}
+
+.mobile-btn .mb-cd {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  min-height: 12px;
+}
+
+.action-cluster {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 12px;
+  align-items: end;
+  justify-items: center;
+}
+
+.mobile-btn.attack {
+  width: 74px;
+  height: 74px;
+  border-color: rgba(224, 82, 69, 0.6);
+  font-size: 26px;
+}
+
+.mobile-btn.special {
+  border-color: rgba(225, 181, 96, 0.55);
+}
+
+.mobile-sprint {
+  position: fixed;
+  left: calc(env(safe-area-inset-left, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 150px);
+  font-size: 22px;
 }
