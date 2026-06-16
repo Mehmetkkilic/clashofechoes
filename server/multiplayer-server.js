@@ -53,7 +53,7 @@ const mimeTypes = {
 };
 
 server.listen(port, host, () => {
-  console.log(`Clash of Echoes server running on http://${host}:${port}`);
+  console.log(`Riftbound Arena server running on http://${host}:${port}`);
 });
 
 const heartbeatTimer = setInterval(() => {

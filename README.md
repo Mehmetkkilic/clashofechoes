@@ -1,4 +1,4 @@
-# Clash of Echoes
+# Riftbound Arena
 
 Browser prototype for a low-poly first-person hero arena game.
 
