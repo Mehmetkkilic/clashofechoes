@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import "./styles.css";
 
 const canvas = document.querySelector("#game");
@@ -66,6 +69,12 @@ const ui = {
     e: document.querySelector("#e-cd"),
     r: document.querySelector("#r-cd"),
   },
+  upgradeModal: document.querySelector("#upgrade-modal"),
+  upgradeCards: Array.from(document.querySelectorAll(".upgrade-card")).map((root) => ({
+    root,
+    name: root.querySelector(".upgrade-name"),
+    desc: root.querySelector(".upgrade-desc"),
+  })),
 };
 
 const CLASS_DATA = {
@@ -95,7 +104,7 @@ const CLASS_DATA = {
     name: "Ranger",
     hp: 100,
     speed: 7.1,
-    accent: 0x7fcf79,
+    accent: 0x5cc9e6,
     primary: "Arrow Shot",
     secondary: "Charged Arrow",
     q: "Dodge Roll",
@@ -106,7 +115,7 @@ const CLASS_DATA = {
     name: "Witch",
     hp: 90,
     speed: 6.7,
-    accent: 0xb77ce8,
+    accent: 0x8fdc3c,
     primary: "Sound Wave",
     secondary: "Scream",
     q: "Silence",
@@ -192,6 +201,69 @@ const player = {
   invulnerable: 0,
 };
 
+// Roguelite upgrade modifiers. Stack during a match, reset on new round.
+const mods = {
+  damageMult: 1,
+  lifesteal: 0,
+  speedMult: 1,
+  cdrBonus: 0,
+  maxHpBonus: 0,
+};
+
+const upgradeState = {
+  open: false,
+  queued: 0,
+  options: [],
+  autoPickAt: 0,
+};
+
+let lastScore = 0;
+
+const UPGRADE_POOL = [
+  {
+    id: "lifesteal",
+    name: "Vampirizm",
+    desc: "Verdiğin hasarın %15'i kadar can çal",
+    apply() {
+      mods.lifesteal += 0.15;
+    },
+  },
+  {
+    id: "damage",
+    name: "Keskinlik",
+    desc: "Hasar +%20",
+    apply() {
+      mods.damageMult += 0.2;
+    },
+  },
+  {
+    id: "speed",
+    name: "Çeviklik",
+    desc: "Hareket hızı +%12",
+    apply() {
+      mods.speedMult += 0.12;
+    },
+  },
+  {
+    id: "cdr",
+    name: "Soğukkanlılık",
+    desc: "Yetenek bekleme süreleri %18 daha hızlı",
+    apply() {
+      mods.cdrBonus += 0.18;
+    },
+  },
+  {
+    id: "maxhp",
+    name: "Dayanıklılık",
+    desc: "Maksimum can +25 (ve hemen iyileş)",
+    apply() {
+      mods.maxHpBonus += 25;
+      player.maxHp = classBaseHp() + mods.maxHpBonus;
+      player.hp = Math.min(player.maxHp, player.hp + 25);
+    },
+  },
+];
+
 const enemies = [];
 const projectiles = [];
 const effects = [];
@@ -271,6 +343,7 @@ const lightingState = {
 let yaw = 0;
 let pitch = -0.04;
 let lastHitFlash = 0;
+let composer = null;
 let weaponGroup;
 let weaponState = 0;
 let controlsLocked = false;
@@ -300,6 +373,7 @@ init();
 function init() {
   setupWorld();
   setupLights();
+  setupPostProcessing();
   applyLightingSettings();
   setupArena();
   setupPlayerWeapon();
@@ -1293,11 +1367,97 @@ function handleMatchReset() {
   matchState.resetAt = 0;
   player.score = 0;
   player.deaths = 0;
+  lastScore = 0;
+  resetMods();
   respawnPlayer();
   showMatchBanner("New Round", `First to ${matchState.limit} kills`);
   setTimeout(() => {
     if (matchState.status === "playing") ui.matchBanner.classList.add("hidden");
   }, 1800);
+}
+
+function classBaseHp() {
+  return CLASS_DATA[player.classId]?.hp ?? 100;
+}
+
+function healPlayer(value) {
+  if (value <= 0 || player.deadTimer > 0) return;
+  player.hp = Math.min(player.maxHp, player.hp + value);
+}
+
+function resetMods() {
+  mods.damageMult = 1;
+  mods.lifesteal = 0;
+  mods.speedMult = 1;
+  mods.cdrBonus = 0;
+  mods.maxHpBonus = 0;
+  player.maxHp = classBaseHp();
+  player.hp = Math.min(player.hp, player.maxHp);
+  upgradeState.queued = 0;
+  closeUpgradeModal();
+}
+
+function updateUpgrades() {
+  const delta = player.score - lastScore;
+  if (delta > 0) {
+    // A small jump is a fresh kill; a large jump is a join/score resync.
+    if (delta <= 2) upgradeState.queued += delta;
+    lastScore = player.score;
+  } else if (delta < 0) {
+    lastScore = player.score;
+  }
+
+  if (!upgradeState.open && upgradeState.queued > 0 && controlsLocked) {
+    upgradeState.queued -= 1;
+    offerUpgrades();
+  }
+
+  if (upgradeState.open && performance.now() >= upgradeState.autoPickAt) {
+    selectUpgrade(0);
+  }
+}
+
+function offerUpgrades() {
+  if (upgradeState.open || !ui.upgradeModal) return;
+  const pool = UPGRADE_POOL.slice();
+  const options = [];
+  while (options.length < 3 && pool.length) {
+    const idx = Math.floor(Math.random() * pool.length);
+    options.push(pool.splice(idx, 1)[0]);
+  }
+  upgradeState.options = options;
+  upgradeState.open = true;
+  upgradeState.autoPickAt = performance.now() + 6000;
+  renderUpgradeModal();
+  ui.upgradeModal.classList.remove("hidden");
+  playSound("class");
+}
+
+function renderUpgradeModal() {
+  ui.upgradeCards.forEach((card, i) => {
+    const opt = upgradeState.options[i];
+    card.root.style.display = opt ? "" : "none";
+    if (opt) {
+      card.name.textContent = opt.name;
+      card.desc.textContent = opt.desc;
+    }
+  });
+}
+
+function selectUpgrade(index) {
+  if (!upgradeState.open) return;
+  const choice = upgradeState.options[index];
+  if (!choice) return;
+  choice.apply();
+  addFeed(`Yükseltme: ${choice.name}`, "Roguelite");
+  playSound("class");
+  closeUpgradeModal();
+}
+
+function closeUpgradeModal() {
+  upgradeState.open = false;
+  upgradeState.options = [];
+  if (ui.upgradeModal) ui.upgradeModal.classList.add("hidden");
 }
 
 function clearRemotePlayers() {
@@ -1721,7 +1881,12 @@ function rebuildWeapon() {
 
   const data = CLASS_DATA[player.classId];
   const handMat = new THREE.MeshLambertMaterial({ color: 0x3b2d27, flatShading: true });
-  const accentMat = new THREE.MeshLambertMaterial({ color: data.accent, flatShading: true });
+  const accentMat = new THREE.MeshLambertMaterial({
+    color: data.accent,
+    emissive: data.accent,
+    emissiveIntensity: 0.9,
+    flatShading: true,
+  });
   const metalMat = new THREE.MeshLambertMaterial({ color: 0xc9c6ba, flatShading: true });
   const woodMat = new THREE.MeshLambertMaterial({ color: 0x6f4a30, flatShading: true });
 
@@ -1856,7 +2021,12 @@ function createEnemy(index, x, z) {
 function createRemotePlayer(id, state) {
   const group = new THREE.Group();
   const color = classColor(state.classId);
-  const bodyMat = new THREE.MeshLambertMaterial({ color, flatShading: true });
+  const bodyMat = new THREE.MeshLambertMaterial({
+    color,
+    emissive: color,
+    emissiveIntensity: 0.28,
+    flatShading: true,
+  });
   const headMat = new THREE.MeshLambertMaterial({ color: 0xd6d0be, flatShading: true });
   const trimMat = new THREE.MeshBasicMaterial({ color });
 
@@ -1937,6 +2107,7 @@ function updateRemotePlayer(id, state) {
   }
 
   remote.body.material.color.setHex(classColor(state.classId));
+  remote.body.material.emissive.setHex(classColor(state.classId));
   remote.group.rotation.y = state.yaw ?? 0;
   remote.group.visible = !state.dead && (state.hp ?? 0) > 0;
   remote.weapon.visible = remote.group.visible;
@@ -2171,6 +2342,24 @@ function bindEvents() {
 
     if (document.activeElement === ui.nickInput) return;
 
+    if (upgradeState.open) {
+      if (event.code === "Digit1") {
+        event.preventDefault();
+        selectUpgrade(0);
+        return;
+      }
+      if (event.code === "Digit2") {
+        event.preventDefault();
+        selectUpgrade(1);
+        return;
+      }
+      if (event.code === "Digit3") {
+        event.preventDefault();
+        selectUpgrade(2);
+        return;
+      }
+    }
+
     switch (event.code) {
       case "KeyW":
         input.forward = true;
@@ -2256,6 +2445,12 @@ function bindEvents() {
       canvas.focus();
     });
   });
+
+  ui.upgradeCards.forEach((card) => {
+    card.root.addEventListener("click", () => {
+      selectUpgrade(Number(card.root.dataset.index));
+    });
+  });
 }
 
 function requestArenaPointerLock() {
@@ -2268,8 +2463,8 @@ function selectClass(classId) {
   if (!CLASS_DATA[classId]) return;
   player.classId = classId;
   const data = CLASS_DATA[classId];
-  player.maxHp = data.hp;
-  player.hp = data.hp;
+  player.maxHp = data.hp + mods.maxHpBonus;
+  player.hp = player.maxHp;
   player.shield = false;
   player.chargingShot = false;
   player.chargeRush = 0;
@@ -2296,17 +2491,33 @@ function selectClass(classId) {
   addFeed(`${data.name} selected`, "Loadout");
 }
 
+function setupPostProcessing() {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    0.72, // strength
+    0.85, // radius
+    0.6 // threshold — only torches and emissive surfaces bloom
+  );
+  composer.addPass(bloom);
+}
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   update(dt);
-  renderer.render(scene, camera);
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 
 function update(dt) {
+  const cdRate = 1 + mods.cdrBonus;
   for (const key of Object.keys(cooldowns)) {
-    cooldowns[key] = Math.max(0, cooldowns[key] - dt);
+    cooldowns[key] = Math.max(0, cooldowns[key] - dt * cdRate);
   }
+
+  updateUpgrades();
 
   if (player.invulnerable > 0) player.invulnerable -= dt;
   if (lastHitFlash > 0) {
@@ -2360,7 +2571,7 @@ function updatePlayer(dt) {
   if (input.left) wish.sub(right);
   if (wish.lengthSq() > 0) wish.normalize();
 
-  let speed = classData.speed + (input.sprint ? 1.2 : 0);
+  let speed = (classData.speed + (input.sprint ? 1.2 : 0)) * mods.speedMult;
   if (player.shield) speed *= 0.54;
   if (player.chargingShot) speed *= 0.72;
   if (player.chargeRush > 0) {
@@ -3184,7 +3395,9 @@ function damageArea(center, radius, damage, label, color, extra = {}) {
 
 function hitEnemy(enemy, amount, label, color, extra = {}) {
   if (!enemy.alive) return;
+  amount *= mods.damageMult;
   enemy.hp -= amount;
+  if (mods.lifesteal > 0) healPlayer(amount * mods.lifesteal);
 
   if (extra.freeze) enemy.frozen = Math.max(enemy.frozen, extra.freeze);
   if (extra.silence) enemy.silenced = Math.max(enemy.silenced, extra.silence);
@@ -3214,9 +3427,11 @@ function hitEnemy(enemy, amount, label, color, extra = {}) {
 function hitRemotePlayer(remote, amount, label, color, extra = {}) {
   if (!isRemoteAlive(remote)) return;
 
+  amount *= mods.damageMult;
   const sent = sendMultiplayerHit(remote, amount, label, color, extra);
   if (!sent) return;
 
+  if (mods.lifesteal > 0) healPlayer(amount * mods.lifesteal);
   spawnHitBurst(remote.group.position.clone().add(new THREE.Vector3(0, 1.3, 0)), color);
   if (!extra.quiet) {
     playSound("hit", clamp(amount / 60, 0.45, 1.25));
@@ -3282,6 +3497,7 @@ function damagePlayer(amount, enemy) {
 function respawnPlayer() {
   player.position.set(0, PLAYER_EYE_HEIGHT, 18);
   player.velocity.set(0, 0, 0);
+  player.maxHp = classBaseHp() + mods.maxHpBonus;
   player.hp = player.maxHp;
   player.invulnerable = 1.2;
   player.shield = false;
@@ -3699,6 +3915,7 @@ function resize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
   renderer.setSize(width, height, false);
+  if (composer) composer.setSize(width, height);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
 }
