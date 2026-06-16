@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <title>Riftbound Arena - Combat Demo</title>
   </head>
   <body>
@@ -116,6 +119,37 @@
         </div>
         <div id="scoreboard-list" class="scoreboard-list"></div>
       </section>
+
+      <div id="mobile-look" class="mobile-look" aria-hidden="true">
+        <div class="look-zone"></div>
+        <div class="joystick-zone">
+          <div class="joystick-base">
+            <div class="joystick-knob"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="mobile-actions" class="mobile-actions" aria-hidden="true">
+        <button class="mobile-btn mobile-sprint" data-action="sprint" type="button">»</button>
+        <div class="action-cluster">
+          <button class="mobile-btn ab" data-action="q" data-slot="q" type="button">
+            <span class="mb-label">Q</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab" data-action="e" data-slot="e" type="button">
+            <span class="mb-label">E</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab" data-action="r" data-slot="r" type="button">
+            <span class="mb-label">R</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn special" data-action="secondary" data-slot="secondary" type="button">
+            <span class="mb-label">⛨</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn jump" data-action="jump" type="button">⤒</button>
+          <button class="mobile-btn attack" data-action="primary" data-slot="primary" type="button">
+            <span class="mb-label">⚔</span><span class="mb-cd"></span>
+          </button>
+        </div>
+      </div>
 
       <section id="upgrade-modal" class="upgrade-modal hidden" aria-label="Choose upgrade">
         <strong class="upgrade-title">Güçlen — bir yükseltme seç</strong>

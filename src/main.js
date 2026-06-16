@@ -75,6 +75,13 @@ const ui = {
     name: root.querySelector(".upgrade-name"),
     desc: root.querySelector(".upgrade-desc"),
   })),
+  mobileAbilityButtons: Array.from(
+    document.querySelectorAll("#mobile-actions .mobile-btn[data-slot]")
+  ).map((root) => ({
+    root,
+    slot: root.dataset.slot,
+    cd: root.querySelector(".mb-cd"),
+  })),
 };
 
 const CLASS_DATA = {
@@ -146,6 +153,14 @@ const PLAYER_EYE_HEIGHT = 1.72;
 const PLAYER_RADIUS = 0.55;
 const PLAYER_STEP_HEIGHT = 0.82;
 const MATCH_KILL_LIMIT = 20;
+
+const isTouch =
+  (typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches) ||
+  "ontouchstart" in window ||
+  navigator.maxTouchPoints > 0;
+
+// Analog movement from the on-screen joystick (x: right, y: down), range [-1, 1].
+const touchMove = { active: false, x: 0, y: 0 };
 
 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
 const audioState = {
@@ -379,6 +394,7 @@ function init() {
   setupPlayerWeapon();
   spawnEnemies();
   bindEvents();
+  setupMobileControls();
   setupPlayerName();
   exposeDebugState();
   initMultiplayer();
@@ -2271,13 +2287,18 @@ function bindEvents() {
 
   canvas.addEventListener("click", () => {
     unlockAudio();
-    requestArenaPointerLock();
+    if (isTouch) {
+      if (!controlsLocked) startMobileArena();
+    } else {
+      requestArenaPointerLock();
+    }
   });
 
   ui.enterArena.addEventListener("click", () => {
     unlockAudio();
     commitPlayerName();
-    requestArenaPointerLock();
+    if (isTouch) startMobileArena();
+    else requestArenaPointerLock();
   });
 
   ui.nickInput.addEventListener("keydown", (event) => {
@@ -2459,6 +2480,179 @@ function requestArenaPointerLock() {
   if (request?.catch) request.catch(() => {});
 }
 
+// Touch devices cannot use pointer lock, so enter the arena directly.
+function startMobileArena() {
+  controlsLocked = true;
+  ui.lockPanel.classList.add("hidden");
+  document.body.classList.add("playing");
+  if (!matchStarted) {
+    matchStarted = true;
+    commitPlayerName();
+    addFeed("Match started", "Arena");
+    sendMultiplayerState(true);
+  }
+}
+
+function setupMobileControls() {
+  if (!isTouch) return;
+  document.body.classList.add("touch");
+
+  const lookZone = document.querySelector("#mobile-look .look-zone");
+  const joyZone = document.querySelector("#mobile-look .joystick-zone");
+  const joyBase = document.querySelector("#mobile-look .joystick-base");
+  const joyKnob = document.querySelector("#mobile-look .joystick-knob");
+  if (!lookZone || !joyZone) return;
+
+  let lookId = null;
+  let lookX = 0;
+  let lookY = 0;
+  lookZone.addEventListener(
+    "touchstart",
+    (event) => {
+      if (lookId !== null) return;
+      const t = event.changedTouches[0];
+      lookId = t.identifier;
+      lookX = t.clientX;
+      lookY = t.clientY;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  lookZone.addEventListener(
+    "touchmove",
+    (event) => {
+      for (const t of event.changedTouches) {
+        if (t.identifier !== lookId) continue;
+        yaw -= (t.clientX - lookX) * 0.004;
+        pitch -= (t.clientY - lookY) * 0.004;
+        pitch = clamp(pitch, -1.32, 1.18);
+        lookX = t.clientX;
+        lookY = t.clientY;
+      }
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  const endLook = (event) => {
+    for (const t of event.changedTouches) {
+      if (t.identifier === lookId) lookId = null;
+    }
+  };
+  lookZone.addEventListener("touchend", endLook);
+  lookZone.addEventListener("touchcancel", endLook);
+
+  const radius = 56;
+  let joyId = null;
+  let joyOx = 0;
+  let joyOy = 0;
+  joyZone.addEventListener(
+    "touchstart",
+    (event) => {
+      if (joyId !== null) return;
+      const t = event.changedTouches[0];
+      joyId = t.identifier;
+      joyOx = t.clientX;
+      joyOy = t.clientY;
+      joyBase.style.left = `${joyOx}px`;
+      joyBase.style.top = `${joyOy}px`;
+      joyBase.classList.add("visible");
+      joyKnob.style.transform = "translate(-50%, -50%)";
+      touchMove.active = true;
+      touchMove.x = 0;
+      touchMove.y = 0;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  joyZone.addEventListener(
+    "touchmove",
+    (event) => {
+      for (const t of event.changedTouches) {
+        if (t.identifier !== joyId) continue;
+        let dx = t.clientX - joyOx;
+        let dy = t.clientY - joyOy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > radius) {
+          dx = (dx / dist) * radius;
+          dy = (dy / dist) * radius;
+        }
+        touchMove.x = dx / radius;
+        touchMove.y = dy / radius;
+        joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      }
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+  const endJoy = (event) => {
+    for (const t of event.changedTouches) {
+      if (t.identifier !== joyId) continue;
+      joyId = null;
+      touchMove.active = false;
+      touchMove.x = 0;
+      touchMove.y = 0;
+      joyBase.classList.remove("visible");
+    }
+  };
+  joyZone.addEventListener("touchend", endJoy);
+  joyZone.addEventListener("touchcancel", endJoy);
+
+  document.querySelectorAll("#mobile-actions .mobile-btn").forEach((btn) => {
+    const action = btn.dataset.action;
+    btn.addEventListener(
+      "touchstart",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        unlockAudio();
+        handleMobileAction(action, true, btn);
+      },
+      { passive: false }
+    );
+    btn.addEventListener(
+      "touchend",
+      (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        handleMobileAction(action, false, btn);
+      },
+      { passive: false }
+    );
+  });
+}
+
+function handleMobileAction(action, pressed, btn) {
+  if (upgradeState.open && pressed) {
+    // Let upgrade taps fall through to the modal cards instead.
+    return;
+  }
+  switch (action) {
+    case "primary":
+      if (pressed) usePrimary();
+      break;
+    case "secondary":
+      if (pressed) useSecondaryDown();
+      else useSecondaryUp();
+      break;
+    case "q":
+    case "e":
+    case "r":
+      if (pressed) useAbility(action);
+      break;
+    case "jump":
+      if (pressed) input.jump = true;
+      break;
+    case "sprint":
+      if (pressed) {
+        input.sprint = !input.sprint;
+        btn?.classList.toggle("active", input.sprint);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
 function selectClass(classId) {
   if (!CLASS_DATA[classId]) return;
   player.classId = classId;
@@ -2569,7 +2763,11 @@ function updatePlayer(dt) {
   if (input.back) wish.sub(forward);
   if (input.right) wish.add(right);
   if (input.left) wish.sub(right);
-  if (wish.lengthSq() > 0) wish.normalize();
+  if (touchMove.active) {
+    wish.add(forward.clone().multiplyScalar(-touchMove.y));
+    wish.add(right.clone().multiplyScalar(touchMove.x));
+  }
+  if (wish.lengthSq() > 1) wish.normalize();
 
   let speed = (classData.speed + (input.sprint ? 1.2 : 0)) * mods.speedMult;
   if (player.shield) speed *= 0.54;
@@ -3908,6 +4106,12 @@ function updateHud() {
   }
   if (player.chargingShot) {
     ui.abilityCooldowns.secondary.textContent = `${Math.round(clamp(player.chargeTime / 1.25, 0, 1) * 100)}%`;
+  }
+
+  for (const b of ui.mobileAbilityButtons) {
+    const cd = cooldowns[b.slot] ?? 0;
+    b.root.classList.toggle("cooling", cd > 0.01);
+    if (b.cd) b.cd.textContent = cd > 0.01 ? cd.toFixed(cd > 9.9 ? 0 : 1) : "";
   }
 }
 
