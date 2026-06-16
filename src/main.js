@@ -82,6 +82,9 @@ const ui = {
     slot: root.dataset.slot,
     cd: root.querySelector(".mb-cd"),
   })),
+  classHud: document.querySelector(".class-hud"),
+  classToggle: document.querySelector("#class-toggle"),
+  classToggleLabel: document.querySelector("#class-toggle-label"),
 };
 
 const CLASS_DATA = {
@@ -2578,6 +2581,7 @@ function setupMobileControls() {
         }
         touchMove.x = dx / radius;
         touchMove.y = dy / radius;
+        input.sprint = Math.hypot(touchMove.x, touchMove.y) > 0.82;
         joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
       }
       event.preventDefault();
@@ -2591,6 +2595,7 @@ function setupMobileControls() {
       touchMove.active = false;
       touchMove.x = 0;
       touchMove.y = 0;
+      input.sprint = false;
       joyBase.classList.remove("visible");
     }
   };
@@ -2619,6 +2624,12 @@ function setupMobileControls() {
       { passive: false }
     );
   });
+
+  if (ui.classToggle && ui.classHud) {
+    ui.classToggle.addEventListener("click", () => {
+      ui.classHud.classList.toggle("open");
+    });
+  }
 }
 
 function handleMobileAction(action, pressed, btn) {
@@ -2683,6 +2694,11 @@ function selectClass(classId) {
   sendMultiplayerState(true);
   playSound("class");
   addFeed(`${data.name} selected`, "Loadout");
+
+  if (isTouch) {
+    if (ui.classToggleLabel) ui.classToggleLabel.textContent = data.name;
+    if (ui.classHud) ui.classHud.classList.remove("open");
+  }
 }
 
 function setupPostProcessing() {
