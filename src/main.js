@@ -368,12 +368,61 @@ let controlsLocked = false;
 let matchStarted = false;
 let footstepTimer = 0;
 
+// Procedural near-white grain to modulate a material's base color (no asset downloads).
+function makeGrainTexture(repeat = 6, contrast = 0.24) {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.round(255 * (1 - contrast + Math.random() * contrast));
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Grayscale noise reused as a bump map for surface relief under the torches.
+function makeBumpTexture(repeat = 6) {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(size, size);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = 90 + Math.floor(Math.random() * 165);
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  return tex;
+}
+
+function texturedLambert(color, { repeat = 6, contrast = 0.24, bump = 0.35 } = {}) {
+  return new THREE.MeshLambertMaterial({
+    color,
+    flatShading: true,
+    map: makeGrainTexture(repeat, contrast),
+    bumpMap: makeBumpTexture(repeat),
+    bumpScale: bump,
+  });
+}
+
 const materials = {
-  grass: new THREE.MeshLambertMaterial({ color: 0x53785b, flatShading: true }),
-  dirt: new THREE.MeshLambertMaterial({ color: 0x6f5f46, flatShading: true }),
-  stone: new THREE.MeshLambertMaterial({ color: 0x778076, flatShading: true }),
-  darkStone: new THREE.MeshLambertMaterial({ color: 0x4a534f, flatShading: true }),
-  wood: new THREE.MeshLambertMaterial({ color: 0x76583b, flatShading: true }),
+  grass: texturedLambert(0x53785b, { repeat: 26, contrast: 0.34, bump: 0.25 }),
+  dirt: texturedLambert(0x6f5f46, { repeat: 14, contrast: 0.3, bump: 0.3 }),
+  stone: texturedLambert(0x778076, { repeat: 7, contrast: 0.26, bump: 0.45 }),
+  darkStone: texturedLambert(0x4a534f, { repeat: 5, contrast: 0.24, bump: 0.45 }),
+  wood: texturedLambert(0x76583b, { repeat: 4, contrast: 0.28, bump: 0.4 }),
   enemy: new THREE.MeshLambertMaterial({ color: 0x753f47, flatShading: true }),
   enemyHead: new THREE.MeshLambertMaterial({ color: 0xb8625c, flatShading: true }),
   enemyFrozen: new THREE.MeshLambertMaterial({
@@ -2706,9 +2755,9 @@ function setupPostProcessing() {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.72, // strength
-    0.85, // radius
-    0.6 // threshold — only torches and emissive surfaces bloom
+    0.34, // strength — subtle glow, not blown out
+    0.5, // radius
+    0.82 // threshold — only torches / emissive surfaces bloom
   );
   composer.addPass(bloom);
 }
@@ -2756,9 +2805,9 @@ function updateTorchLights() {
     const clamped = clamp(flicker, 0.72, 1.08);
     const power = lightingState.torchPower ?? 1;
     torch.light.intensity = torch.baseIntensity * power * clamped;
-    torch.flame.scale.setScalar(0.86 + clamped * 0.18);
-    torch.glow.scale.setScalar(1.04 + clamped * 0.38);
-    torch.glow.material.opacity = clamp((0.08 + clamped * 0.06) * power, 0.025, 0.2);
+    torch.flame.scale.setScalar(0.82 + clamped * 0.16);
+    torch.glow.scale.setScalar(0.86 + clamped * 0.3);
+    torch.glow.material.opacity = clamp((0.05 + clamped * 0.05) * power, 0.02, 0.13);
   }
 }
 
