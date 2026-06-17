@@ -524,25 +524,103 @@ h1 {
   top: 50%;
   left: 50%;
   display: grid;
-  width: min(280px, calc(100vw - 36px));
-  min-height: 168px;
-  gap: 9px;
-  place-items: center;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  gap: 10px;
+  justify-items: center;
   padding: 16px;
   border: 1px solid rgba(225, 181, 96, 0.48);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--panel-strong);
-  cursor: pointer;
   transform: translate(-50%, -50%);
+  overflow: auto;
 }
 
-.lock-panel strong {
-  font-size: 24px;
+.start-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
 }
 
-.lock-panel span {
+.preview-canvas {
+  width: 100%;
+  height: 190px;
+  border-radius: 8px;
+  background:
+    radial-gradient(120% 90% at 50% 10%, rgba(225, 181, 96, 0.12), transparent 60%),
+    rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.start-hero {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.start-hero #start-hero-name {
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.start-hero #start-hero-info {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
+}
+
+.start-classes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.class-card {
+  min-height: 38px;
+  padding: 6px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.class-card:hover,
+.class-card:focus-visible {
+  border-color: rgba(255, 255, 255, 0.3);
+  outline: 0;
+}
+
+.class-card.active {
+  border-color: rgba(225, 181, 96, 0.85);
+  background: rgba(225, 181, 96, 0.18);
+}
+
+.start-join {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 2px;
+  border: 1px solid rgba(225, 181, 96, 0.7);
+  border-radius: 6px;
+  background: rgba(225, 181, 96, 0.22);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
+  font-size: 15px;
+}
+
+.start-join:hover,
+.start-join:focus-visible {
+  border-color: rgba(225, 181, 96, 0.95);
+  outline: 0;
+}
+
+/* Class panel/toggle belong to in-game play only; the start screen handles pre-game choice. */
+body:not(.playing) .class-hud,
+body:not(.playing) .class-toggle {
+  display: none;
 }
 
 .nick-field {
@@ -571,23 +649,6 @@ h1 {
 
 .nick-field input:focus {
   border-color: rgba(225, 181, 96, 0.72);
-}
-
-.lock-panel button {
-  min-width: 128px;
-  min-height: 34px;
-  border: 1px solid rgba(225, 181, 96, 0.62);
-  border-radius: 5px;
-  background: rgba(225, 181, 96, 0.18);
-  color: var(--ink);
-  cursor: pointer;
-  font-weight: 900;
-}
-
-.lock-panel button:hover,
-.lock-panel button:focus-visible {
-  border-color: rgba(225, 181, 96, 0.92);
-  outline: 0;
 }
 
 .lock-panel.hidden {

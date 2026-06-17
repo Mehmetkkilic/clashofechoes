@@ -87,6 +87,10 @@ const ui = {
   classHud: document.querySelector(".class-hud"),
   classToggle: document.querySelector("#class-toggle"),
   classToggleLabel: document.querySelector("#class-toggle-label"),
+  previewCanvas: document.querySelector("#preview-canvas"),
+  startCards: Array.from(document.querySelectorAll(".class-card")),
+  startHeroName: document.querySelector("#start-hero-name"),
+  startHeroInfo: document.querySelector("#start-hero-info"),
 };
 
 const CLASS_DATA = {
@@ -364,6 +368,12 @@ let yaw = 0;
 let pitch = -0.04;
 let lastHitFlash = 0;
 let composer = null;
+let previewRenderer = null;
+let previewScene = null;
+let previewCamera = null;
+let previewModel = null;
+let previewMixer = null;
+let previewActive = true;
 let weaponGroup;
 let weaponState = 0;
 let controlsLocked = false;
@@ -461,7 +471,10 @@ function loadCharacterModels() {
   for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
     gltfLoader.load(
       url,
-      (gltf) => modelCache.set(key, gltf),
+      (gltf) => {
+        modelCache.set(key, gltf);
+        if (previewActive && key === player.classId && !previewModel) setPreviewClass(key);
+      },
       undefined,
       (err) => console.warn("Character model failed to load:", key, err)
     );
@@ -554,6 +567,7 @@ function init() {
   spawnEnemies();
   bindEvents();
   setupMobileControls();
+  setupCharacterPreview();
   setupPlayerName();
   exposeDebugState();
   initMultiplayer();
@@ -2521,6 +2535,8 @@ function bindEvents() {
     const locked = document.pointerLockElement === canvas;
     controlsLocked = locked;
     ui.lockPanel.classList.toggle("hidden", locked);
+    document.body.classList.toggle("playing", locked);
+    if (locked) stopPreview();
     if (locked && !matchStarted) {
       matchStarted = true;
       commitPlayerName();
@@ -2682,6 +2698,7 @@ function startMobileArena() {
   controlsLocked = true;
   ui.lockPanel.classList.add("hidden");
   document.body.classList.add("playing");
+  stopPreview();
   if (!matchStarted) {
     matchStarted = true;
     commitPlayerName();
@@ -2893,6 +2910,11 @@ function selectClass(classId) {
     if (ui.classToggleLabel) ui.classToggleLabel.textContent = data.name;
     if (ui.classHud) ui.classHud.classList.remove("open");
   }
+
+  if (ui.startHeroName) ui.startHeroName.textContent = data.name;
+  if (ui.startHeroInfo) ui.startHeroInfo.textContent = `${data.hp} HP · ${data.primary}`;
+  ui.startCards.forEach((card) => card.classList.toggle("active", card.dataset.class === classId));
+  if (previewActive) setPreviewClass(classId);
 }
 
 function setupPostProcessing() {
@@ -2907,11 +2929,85 @@ function setupPostProcessing() {
   composer.addPass(bloom);
 }
 
+function setupCharacterPreview() {
+  if (!ui.previewCanvas) return;
+  previewRenderer = new THREE.WebGLRenderer({ canvas: ui.previewCanvas, alpha: true, antialias: true });
+  previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  previewScene = new THREE.Scene();
+  previewCamera = new THREE.PerspectiveCamera(34, 1, 0.1, 50);
+  previewCamera.position.set(0, 1.0, 3.1);
+  previewCamera.lookAt(0, 0.95, 0);
+
+  previewScene.add(new THREE.HemisphereLight(0xcfe0ff, 0x1d1d22, 1.15));
+  const key = new THREE.DirectionalLight(0xfff0d0, 1.7);
+  key.position.set(2.5, 4, 3);
+  previewScene.add(key);
+  const rim = new THREE.DirectionalLight(0x8fb4ff, 0.85);
+  rim.position.set(-3, 2.2, -2.5);
+  previewScene.add(rim);
+
+  resizePreview();
+
+  ui.startCards.forEach((card) => {
+    card.addEventListener("click", () => selectClass(card.dataset.class));
+  });
+}
+
+function resizePreview() {
+  if (!previewRenderer || !ui.previewCanvas) return;
+  const w = ui.previewCanvas.clientWidth || 320;
+  const h = ui.previewCanvas.clientHeight || 190;
+  previewRenderer.setSize(w, h, false);
+  previewCamera.aspect = w / h;
+  previewCamera.updateProjectionMatrix();
+}
+
+function setPreviewClass(classId) {
+  if (!previewScene) return;
+  if (previewModel) {
+    previewScene.remove(previewModel);
+    previewModel = null;
+    previewMixer = null;
+  }
+  const gltf = modelCache.get(classId);
+  if (!gltf) return; // retried once models finish loading
+  const root = cloneSkeleton(gltf.scene);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const scale = size.y > 0.001 ? 1.9 / size.y : 1;
+  root.scale.setScalar(scale);
+  root.updateMatrixWorld(true);
+  const grounded = new THREE.Box3().setFromObject(root);
+  root.position.y = -grounded.min.y;
+  root.traverse((o) => {
+    if (o.isMesh) o.frustumCulled = false;
+  });
+  previewScene.add(root);
+  previewModel = root;
+  previewMixer = new THREE.AnimationMixer(root);
+  const idle = (gltf.animations || []).find((c) => c.name === "Idle");
+  if (idle) previewMixer.clipAction(idle).play();
+}
+
+function updatePreview(dt) {
+  if (!previewActive || !previewRenderer) return;
+  if (previewModel) previewModel.rotation.y += dt * 0.6;
+  if (previewMixer) previewMixer.update(dt);
+  previewRenderer.render(previewScene, previewCamera);
+}
+
+function stopPreview() {
+  previewActive = false;
+}
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   update(dt);
   if (composer) composer.render();
   else renderer.render(scene, camera);
+  updatePreview(dt);
   requestAnimationFrame(tick);
 }
 
@@ -4346,6 +4442,7 @@ function resize() {
   if (composer) composer.setSize(width, height);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+  resizePreview();
 }
 
 function clamp(value, min, max) {
