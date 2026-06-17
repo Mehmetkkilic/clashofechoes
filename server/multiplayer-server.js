@@ -47,6 +47,8 @@ const mimeTypes = {
   ".jpeg": "image/jpeg",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".glb": "model/gltf-binary",
+  ".gltf": "model/gltf+json",
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",

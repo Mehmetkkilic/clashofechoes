@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import "./styles.css";
 
 const canvas = document.querySelector("#game");
@@ -435,12 +437,117 @@ const materials = {
   black: new THREE.MeshBasicMaterial({ color: 0x111514 }),
 };
 
+// ---- KayKit CC0 character models (rigged + animated). Box meshes are the fallback. ----
+const CHARACTER_MODELS = {
+  fighter: "/models/kaykit/Knight.glb",
+  priest: "/models/kaykit/Mage.glb",
+  ranger: "/models/kaykit/Rogue.glb",
+  witch: "/models/kaykit/Rogue_Hooded.glb",
+  skeleton: "/models/kaykit/Skeleton_Warrior.glb",
+};
+const ATTACK_CLIP = {
+  fighter: "1H_Melee_Attack_Chop",
+  priest: "Spellcast_Shoot",
+  ranger: "1H_Ranged_Shoot",
+  witch: "Spellcast_Shoot",
+  skeleton: "1H_Melee_Attack_Chop",
+};
+const MODEL_TARGET_HEIGHT = 1.85;
+const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
+const modelCache = new Map();
+const gltfLoader = new GLTFLoader();
+
+function loadCharacterModels() {
+  for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
+    gltfLoader.load(
+      url,
+      (gltf) => modelCache.set(key, gltf),
+      undefined,
+      (err) => console.warn("Character model failed to load:", key, err)
+    );
+  }
+}
+
+function makeCharInstance(key) {
+  const gltf = modelCache.get(key);
+  if (!gltf) return null;
+  const root = cloneSkeleton(gltf.scene);
+  const box = new THREE.Box3().setFromObject(root);
+  const size = box.getSize(new THREE.Vector3());
+  const scale = size.y > 0.001 ? MODEL_TARGET_HEIGHT / size.y : 1;
+  root.scale.setScalar(scale);
+  root.updateMatrixWorld(true);
+  const grounded = new THREE.Box3().setFromObject(root);
+  root.position.y = -grounded.min.y;
+  root.rotation.y = MODEL_FACING_YAW;
+  root.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.frustumCulled = false;
+    }
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  const clips = gltf.animations || [];
+  const action = (name) => {
+    const clip = clips.find((c) => c.name === name);
+    return clip ? mixer.clipAction(clip) : null;
+  };
+  const actions = {
+    idle: action("Idle"),
+    run: action("Running_A") || action("Walking_A"),
+    attack: action(ATTACK_CLIP[key]) || action("1H_Melee_Attack_Chop") || action("Unarmed_Melee_Attack_Punch_A"),
+  };
+  const char = { root, mixer, actions, currentLoco: null, attacking: false, attackTimer: 0 };
+  if (actions.idle) {
+    actions.idle.play();
+    char.currentLoco = actions.idle;
+  }
+  return char;
+}
+
+function setCharLoco(char, moving) {
+  if (!char || char.attacking) return;
+  const next = moving && char.actions.run ? char.actions.run : char.actions.idle;
+  if (!next || char.currentLoco === next) return;
+  next.reset().fadeIn(0.18).play();
+  if (char.currentLoco) char.currentLoco.fadeOut(0.18);
+  char.currentLoco = next;
+}
+
+function triggerCharAttack(char) {
+  if (!char || !char.actions.attack) return;
+  const a = char.actions.attack;
+  a.reset();
+  a.setLoop(THREE.LoopOnce, 1);
+  a.clampWhenFinished = false;
+  a.fadeIn(0.04).play();
+  if (char.currentLoco) char.currentLoco.fadeOut(0.04);
+  char.attacking = true;
+  char.attackTimer = a.getClip().duration;
+}
+
+function updateChar(char, dt, moving) {
+  if (!char) return;
+  if (char.attacking) {
+    char.attackTimer -= dt;
+    if (char.attackTimer <= 0) {
+      char.attacking = false;
+      char.currentLoco = null;
+      setCharLoco(char, moving);
+    }
+  } else {
+    setCharLoco(char, moving);
+  }
+  char.mixer.update(dt);
+}
+
 init();
 
 function init() {
   setupWorld();
   setupLights();
   setupPostProcessing();
+  loadCharacterModels();
   applyLightingSettings();
   setupArena();
   setupPlayerWeapon();
@@ -1138,6 +1245,7 @@ function animateRemoteAttack(id, attack = {}) {
   const remote = remotePlayers.get(id);
   if (!remote) return;
   remote.attackPulse = 1;
+  if (remote.char) triggerCharAttack(remote.char);
   spawnRemoteAttackEffect(remote, attack);
   playSound(soundForAttack(attack.label));
 }
@@ -2062,11 +2170,20 @@ function createEnemy(index, x, z) {
   barGroup.add(back, fill);
   group.add(barGroup);
 
+  const char = makeCharInstance("skeleton");
+  if (char) {
+    group.add(char.root);
+    body.visible = false;
+    head.visible = false;
+    blade.visible = false;
+  }
+
   return {
     id: index,
     group,
     body,
     head,
+    char,
     healthFill: fill,
     hp: 110,
     maxHp: 110,
@@ -2135,11 +2252,21 @@ function createRemotePlayer(id, state) {
 
   scene.add(group);
 
+  const char = makeCharInstance(state.classId);
+  if (char) {
+    group.add(char.root);
+    body.visible = false;
+    head.visible = false;
+    weapon.visible = false;
+  }
+
   return {
     id,
     group,
     body,
+    head,
     weapon,
+    char,
     nameSprite,
     isBot: Boolean(state.bot),
     displayName: displayRemoteName(state, id),
@@ -2172,13 +2299,28 @@ function updateRemotePlayer(id, state) {
     remote.weapon = createRemoteWeapon(state.classId, classColor(state.classId));
     remote.group.add(remote.weapon);
     remote.classId = state.classId;
+    if (remote.char) {
+      remote.group.remove(remote.char.root);
+      remote.char = makeCharInstance(state.classId);
+      if (remote.char) remote.group.add(remote.char.root);
+    }
+  }
+
+  // Upgrade a fallback box to a model once it finishes loading.
+  if (!remote.char && modelCache.has(remote.classId)) {
+    remote.char = makeCharInstance(remote.classId);
+    if (remote.char) {
+      remote.group.add(remote.char.root);
+      remote.body.visible = false;
+      remote.head.visible = false;
+    }
   }
 
   remote.body.material.color.setHex(classColor(state.classId));
   remote.body.material.emissive.setHex(classColor(state.classId));
   remote.group.rotation.y = state.yaw ?? 0;
   remote.group.visible = !state.dead && (state.hp ?? 0) > 0;
-  remote.weapon.visible = remote.group.visible;
+  remote.weapon.visible = remote.group.visible && !remote.char;
   remote.weapon.position.z = state.shield ? -0.18 : 0;
   remote.weapon.rotation.x = state.chargingShot ? -0.35 : 0;
   const hpScale = clamp((state.hp ?? 0) / Math.max(1, state.maxHp ?? 1), 0, 1);
@@ -2189,7 +2331,10 @@ function updateRemotePlayer(id, state) {
 function updateRemotePlayers(dt) {
   for (const remote of remotePlayers.values()) {
     remote.group.position.lerp(remote.target, 0.22);
-    if (remote.attackPulse > 0) {
+    if (remote.char) {
+      const moving = remote.group.position.distanceToSquared(remote.target) > 0.02;
+      updateChar(remote.char, dt, moving);
+    } else if (remote.attackPulse > 0) {
       remote.attackPulse = Math.max(0, remote.attackPulse - dt * 4.8);
       const swing = Math.sin(remote.attackPulse * Math.PI);
       remote.weapon.rotation.z = -swing * 0.68;
@@ -3070,6 +3215,16 @@ function updateEnemies(dt) {
     enemy.fear = Math.max(0, enemy.fear - dt);
     enemy.attackCd = Math.max(0, enemy.attackCd - dt);
 
+    if (!enemy.char && modelCache.has("skeleton")) {
+      enemy.char = makeCharInstance("skeleton");
+      if (enemy.char) {
+        enemy.group.add(enemy.char.root);
+        enemy.body.visible = false;
+        enemy.head.visible = false;
+      }
+    }
+    let enemyMoving = false;
+
     if (enemy.burn > 0) {
       enemy.burn -= dt;
       hitEnemy(enemy, 5 * dt, "Burn", 0xf26f45, { quiet: true });
@@ -3102,13 +3257,17 @@ function updateEnemies(dt) {
 
       if (move.lengthSq() > 0.01) {
         enemy.group.rotation.y = Math.atan2(move.x, move.z);
+        enemyMoving = true;
       }
     }
 
     if (distance < 2.25 && enemy.attackCd <= 0 && player.deadTimer <= 0) {
       enemy.attackCd = 1.05 + Math.random() * 0.25;
       damagePlayer(9, enemy);
+      if (enemy.char) triggerCharAttack(enemy.char);
     }
+
+    if (enemy.char) updateChar(enemy.char, dt, enemyMoving);
 
     enemy.healthFill.scale.x = clamp(enemy.hp / enemy.maxHp, 0, 1);
     enemy.healthFill.position.x = -0.625 * (1 - enemy.healthFill.scale.x);
