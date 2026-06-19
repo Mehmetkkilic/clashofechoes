@@ -467,6 +467,118 @@ const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
 const modelCache = new Map();
 const gltfLoader = new GLTFLoader();
 
+// ---- KayKit CC0 dungeon props (visual dressing only; collision unchanged). ----
+const DUNGEON_MODELS = {
+  torch: "/models/dungeon/torch_lit.gltf.glb",
+  barrel: "/models/dungeon/barrel_large.gltf.glb",
+  crate: "/models/dungeon/box_large.gltf.glb",
+  column: "/models/dungeon/column.gltf.glb",
+  banner: "/models/dungeon/banner_red.gltf.glb",
+  chest: "/models/dungeon/chest_gold.glb",
+  candle: "/models/dungeon/candle_lit.gltf.glb",
+};
+const dungeonCache = new Map();
+const arenaProps = [];
+let arenaDressed = false;
+
+function loadDungeonModels() {
+  let remaining = Object.keys(DUNGEON_MODELS).length;
+  const done = () => {
+    if (--remaining <= 0) dressArena();
+  };
+  for (const [key, url] of Object.entries(DUNGEON_MODELS)) {
+    gltfLoader.load(
+      url,
+      (gltf) => {
+        dungeonCache.set(key, gltf);
+        done();
+      },
+      undefined,
+      (err) => {
+        console.warn("Dungeon model failed to load:", key, err);
+        done();
+      }
+    );
+  }
+}
+
+function placeProp(key, { x, y = 0, z, targetH = null, scale = null, rotY = 0, faceCenter = false, ground = true } = {}) {
+  const gltf = dungeonCache.get(key);
+  if (!gltf) return null;
+  const root = gltf.scene.clone(true);
+  let s = scale ?? 1;
+  if (targetH) {
+    const size = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3());
+    s = size.y > 0.001 ? targetH / size.y : 1;
+  }
+  root.scale.setScalar(s);
+  root.rotation.y = faceCenter ? Math.atan2(-x, -z) : rotY;
+  root.position.set(x, y, z);
+  root.updateMatrixWorld(true);
+  if (ground) {
+    const minY = new THREE.Box3().setFromObject(root).min.y;
+    root.position.y += y - minY; // seat the model's base exactly at height y
+  }
+  root.traverse((o) => {
+    if (o.isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+      o.frustumCulled = false;
+    }
+  });
+  scene.add(root);
+  return root;
+}
+
+function dressArena() {
+  if (arenaDressed) return;
+  arenaDressed = true;
+
+  // Torches: swap the procedural flame/glow for a KayKit torch atop the post; keep the light.
+  for (const torch of torches) {
+    const p = torch.light.position;
+    const postHeight = Math.max(1.25, p.y - 0.55);
+    const model = placeProp("torch", { x: p.x, y: postHeight - 0.2, z: p.z, targetH: 1.5 });
+    if (model) {
+      torch.flame.visible = false;
+      torch.glow.visible = false;
+    }
+  }
+
+  // Barrels / crates replace the procedural props at the same spots (colliders unchanged).
+  for (const prop of arenaProps) {
+    const key = prop.index % 2 ? "crate" : "barrel";
+    const model = placeProp(key, {
+      x: prop.x,
+      z: prop.z,
+      targetH: prop.index % 2 ? 1.9 : 1.6,
+      rotY: prop.index * 0.72,
+    });
+    if (model) prop.mesh.visible = false;
+  }
+
+  // Decorative columns at the four corner towers and gate sides.
+  for (const [x, z] of [[-45, -45], [45, -45], [-45, 45], [45, 45]]) {
+    placeProp("column", { x, z, targetH: 9 });
+  }
+  placeProp("column", { x: -8, z: 47, targetH: 7 });
+  placeProp("column", { x: 8, z: 47, targetH: 7 });
+
+  // Banners on the inner wall faces, facing the arena center.
+  for (const [x, z] of [[-22, -47.5], [22, -47.5], [-47.5, -22], [47.5, 22]]) {
+    placeProp("banner", { x, y: 6.4, z, targetH: 4.4, faceCenter: true, ground: false });
+  }
+
+  // Gold chests as loot accents (one central, two on side platforms at height 7).
+  placeProp("chest", { x: 5, z: 6, targetH: 1.3, rotY: 0.6 });
+  placeProp("chest", { x: -36, y: 7, z: 2, targetH: 1.3, rotY: -0.5 });
+  placeProp("chest", { x: 36, y: 7, z: -2, targetH: 1.3, rotY: 0.5 });
+
+  // A couple of candles on ruin blocks.
+  placeProp("candle", { x: -14, y: 7.8, z: -12, targetH: 0.7 });
+  placeProp("candle", { x: 13, y: 7.2, z: 10, targetH: 0.7 });
+}
+
 function loadCharacterModels() {
   for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
     gltfLoader.load(
@@ -563,6 +675,7 @@ function init() {
   loadCharacterModels();
   applyLightingSettings();
   setupArena();
+  loadDungeonModels();
   setupPlayerWeapon();
   spawnEnemies();
   bindEvents();
@@ -1996,6 +2109,7 @@ function addProps() {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    arenaProps.push({ mesh, x, z, index });
     addBoxCollider(x, z, index % 2 ? 1.9 : 1.8, index % 2 ? 1.9 : 1.8, 0, index % 2 ? 1.9 : 1.6);
   });
 }
