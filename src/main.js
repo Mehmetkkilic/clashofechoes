@@ -374,6 +374,7 @@ let previewCamera = null;
 let previewModel = null;
 let previewMixer = null;
 let previewActive = true;
+let localChar = null;
 let weaponGroup;
 let weaponState = 0;
 let controlsLocked = false;
@@ -464,6 +465,9 @@ const ATTACK_CLIP = {
 };
 const MODEL_TARGET_HEIGHT = 1.85;
 const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
+const TPS_DISTANCE = 4.5;
+const TPS_FOCUS_Y = 0.4;
+const TPS_SHOULDER = 0.7;
 const modelCache = new Map();
 const gltfLoader = new GLTFLoader();
 
@@ -2177,6 +2181,7 @@ function setupPlayerWeapon() {
   camera.add(weaponGroup);
   scene.add(camera);
   rebuildWeapon();
+  weaponGroup.visible = false; // third-person: the character model is shown instead
 }
 
 function rebuildWeapon() {
@@ -3015,6 +3020,7 @@ function selectClass(classId) {
   ui.abilityNames.r.textContent = data.r;
 
   rebuildWeapon();
+  rebuildLocalPlayerModel();
   updateHud();
   sendMultiplayerState(true);
   playSound("class");
@@ -3141,6 +3147,7 @@ function update(dt) {
 
   updatePlayer(dt);
   updateCamera();
+  updateLocalPlayerModel(dt);
   updateWeapon(dt);
   updateProjectiles(dt);
   updateEnemies(dt);
@@ -3326,9 +3333,45 @@ function updateFootsteps(dt, moving, fast) {
 }
 
 function updateCamera() {
-  camera.position.copy(player.position);
-  camera.rotation.y = yaw;
-  camera.rotation.x = pitch;
+  camera.rotation.set(pitch, yaw, 0);
+  camera.updateMatrixWorld();
+  const dir = getCameraForward();
+  const right = getFlatRight();
+  const focus = player.position.clone();
+  focus.y += TPS_FOCUS_Y;
+  camera.position.copy(focus).addScaledVector(dir, -TPS_DISTANCE).addScaledVector(right, TPS_SHOULDER);
+}
+
+function updateLocalPlayerModel(dt) {
+  if (!localChar && modelCache.has(player.classId)) {
+    localChar = makeCharInstance(player.classId);
+    if (localChar) scene.add(localChar.root);
+  }
+  if (!localChar) return;
+  const visible = controlsLocked && player.deadTimer <= 0;
+  localChar.root.visible = visible;
+  if (!visible) return;
+  localChar.root.position.set(
+    player.position.x,
+    player.position.y - PLAYER_EYE_HEIGHT,
+    player.position.z
+  );
+  localChar.root.rotation.y = yaw + MODEL_FACING_YAW;
+  const moving =
+    input.forward || input.back || input.left || input.right || touchMove.active;
+  updateChar(localChar, dt, moving);
+}
+
+function rebuildLocalPlayerModel() {
+  if (localChar) {
+    scene.remove(localChar.root);
+    localChar = null;
+  }
+  const next = makeCharInstance(player.classId);
+  if (next) {
+    scene.add(next.root);
+    localChar = next;
+  }
 }
 
 function updateWeapon(dt) {
@@ -3935,6 +3978,7 @@ function useWitchAbility(slot) {
 }
 
 function swingWeapon(duration) {
+  if (localChar) triggerCharAttack(localChar);
   const start = weaponGroup.rotation.z;
   const effect = {
     mesh: new THREE.Group(),
@@ -4152,8 +4196,11 @@ function spawnProjectile({
   extra = {},
 }) {
   const direction = getCameraForward();
-  const start = camera.position.clone().add(direction.clone().multiplyScalar(1.1));
-  start.y -= 0.12;
+  // Third-person: fire from the character's chest toward the crosshair, not the camera.
+  const start = player.position.clone();
+  start.y -= 0.25;
+  start.add(direction.clone().multiplyScalar(1.0));
+  if (localChar) triggerCharAttack(localChar);
 
   const mesh = createProjectileMesh(shape, color, radius);
   mesh.position.copy(start);
