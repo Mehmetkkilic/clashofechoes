@@ -577,6 +577,9 @@ function dressArena() {
   placeProp("chest", { x: 5, z: 6, targetH: 1.3, rotY: 0.6 });
   placeProp("chest", { x: -36, y: 7, z: 2, targetH: 1.3, rotY: -0.5 });
   placeProp("chest", { x: 36, y: 7, z: -2, targetH: 1.3, rotY: 0.5 });
+  addBoxCollider(5, 6, 1.4, 1.4, 0, 1.3);
+  addBoxCollider(-36, 2, 1.4, 1.4, 7, 8.3);
+  addBoxCollider(36, -2, 1.4, 1.4, 7, 8.3);
 
   // A couple of candles on ruin blocks.
   placeProp("candle", { x: -14, y: 7.8, z: -12, targetH: 0.7 });
@@ -4223,17 +4226,27 @@ function spawnProjectile({
   });
 }
 
+function makeGlowSphere(color, r) {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(r, 12, 10),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+}
+
 function createProjectileMesh(shape, color, radius) {
   const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.94 });
   if (shape === "arrow") {
     const group = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.25, 6), material);
-    const head = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.34, 6), material);
-    shaft.position.y = -0.16;
-    head.position.y = -0.88;
-    shaft.rotation.x = Math.PI / 2;
-    head.rotation.x = Math.PI;
-    group.add(shaft, head);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.0, 8), material);
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 8), material);
+    head.position.y = 0.62; // tip leads the flight direction (+Y maps to velocity)
+    group.add(shaft, head, makeGlowSphere(color, 0.16));
     return group;
   }
 
@@ -4244,10 +4257,17 @@ function createProjectileMesh(shape, color, radius) {
   }
 
   if (shape === "ice") {
-    return new THREE.Mesh(new THREE.OctahedronGeometry(radius), material);
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(new THREE.OctahedronGeometry(radius), material));
+    group.add(makeGlowSphere(color, radius * 1.7));
+    return group;
   }
 
-  return new THREE.Mesh(new THREE.IcosahedronGeometry(radius, 0), material);
+  // default: round glowing orb (fireball / magic) instead of a faceted triangle
+  const group = new THREE.Group();
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(radius, 16, 12), new THREE.MeshBasicMaterial({ color })));
+  group.add(makeGlowSphere(color, radius * 2.0));
+  return group;
 }
 
 function spawnMeteor(point) {

@@ -487,6 +487,8 @@ function tryBotAttack(room, bot, target) {
   if (bot.attackCd > 0 || !target.state) return;
   const distance = horizontalDistance(bot.position, target.state.position);
   if (distance > 2.75) return;
+  // Don't let ground bots hit a player standing on a raised platform.
+  if (Math.abs((bot.position.y || 0) - (target.state.position.y || 0)) > 2.5) return;
 
   bot.attackCd = 0.95 + Math.random() * 0.35;
   const stats = classStats[bot.classId] || classStats.fighter;
