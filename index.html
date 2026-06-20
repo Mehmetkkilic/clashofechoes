@@ -176,7 +176,29 @@
         <span class="upgrade-hint">1 · 2 · 3 ile seç</span>
       </section>
 
-      <section id="lock-panel" class="lock-panel" aria-label="Choose your hero">
+      <section id="loading-screen" class="menu-screen loading-screen" aria-label="Loading">
+        <strong class="menu-title">Riftbound Arena</strong>
+        <div class="loading-track"><div id="loading-bar" class="loading-fill"></div></div>
+        <span id="loading-pct" class="menu-sub">Loading… 0%</span>
+      </section>
+
+      <section id="main-menu" class="menu-screen hidden" aria-label="Main menu">
+        <strong class="menu-title">Riftbound Arena</strong>
+        <span class="menu-sub">Low-poly hero arena</span>
+        <button id="menu-play" class="menu-button" type="button">Play</button>
+        <button id="menu-leaderboard" class="menu-button menu-button--ghost" type="button">Leaderboard</button>
+      </section>
+
+      <section id="leaderboard-screen" class="menu-screen hidden" aria-label="Leaderboard">
+        <strong class="menu-title">Haftalık Sıralama</strong>
+        <div id="leaderboard-list" class="leaderboard-list">
+          <span class="menu-sub">Skor tablosu yakında — backend ile gelecek.</span>
+        </div>
+        <button id="lb-back" class="menu-button menu-button--ghost" type="button">Geri</button>
+      </section>
+
+      <section id="lock-panel" class="lock-panel hidden" aria-label="Choose your hero">
+        <button id="hero-back" class="hero-back" type="button" aria-label="Back to menu">‹ Menü</button>
         <strong class="start-title">Riftbound Arena</strong>
         <canvas id="preview-canvas" class="preview-canvas" aria-hidden="true"></canvas>
         <div class="start-hero">
