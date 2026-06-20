@@ -91,6 +91,15 @@ const ui = {
   startCards: Array.from(document.querySelectorAll(".class-card")),
   startHeroName: document.querySelector("#start-hero-name"),
   startHeroInfo: document.querySelector("#start-hero-info"),
+  loadingScreen: document.querySelector("#loading-screen"),
+  loadingBar: document.querySelector("#loading-bar"),
+  loadingPct: document.querySelector("#loading-pct"),
+  mainMenu: document.querySelector("#main-menu"),
+  leaderboardScreen: document.querySelector("#leaderboard-screen"),
+  menuPlay: document.querySelector("#menu-play"),
+  menuLeaderboard: document.querySelector("#menu-leaderboard"),
+  lbBack: document.querySelector("#lb-back"),
+  heroBack: document.querySelector("#hero-back"),
 };
 
 const CLASS_DATA = {
@@ -469,7 +478,12 @@ const TPS_DISTANCE = 4.5;
 const TPS_FOCUS_Y = 0.4;
 const TPS_SHOULDER = 0.7;
 const modelCache = new Map();
-const gltfLoader = new GLTFLoader();
+const loadingManager = new THREE.LoadingManager();
+const gltfLoader = new GLTFLoader(loadingManager);
+loadingManager.onProgress = (_url, loaded, total) => {
+  setLoadingProgress(total > 0 ? loaded / total : 0);
+};
+loadingManager.onLoad = () => revealMainMenu();
 
 // ---- KayKit CC0 dungeon props (visual dressing only; collision unchanged). ----
 const DUNGEON_MODELS = {
@@ -774,6 +788,7 @@ function init() {
   bindEvents();
   setupMobileControls();
   setupCharacterPreview();
+  setupMenus();
   setupPlayerName();
   exposeDebugState();
   initMultiplayer();
@@ -3202,6 +3217,7 @@ function setPreviewClass(classId) {
 
 function updatePreview(dt) {
   if (!previewActive || !previewRenderer) return;
+  if (!ui.lockPanel || ui.lockPanel.classList.contains("hidden")) return; // only on hero-select
   if (previewModel) previewModel.rotation.y += dt * 0.6;
   if (previewMixer) previewMixer.update(dt);
   previewRenderer.render(previewScene, previewCamera);
@@ -3209,6 +3225,48 @@ function updatePreview(dt) {
 
 function stopPreview() {
   previewActive = false;
+}
+
+let mainMenuShown = false;
+
+function setLoadingProgress(frac) {
+  const pct = Math.round(clamp(frac, 0, 1) * 100);
+  if (ui.loadingBar) ui.loadingBar.style.width = `${pct}%`;
+  if (ui.loadingPct) ui.loadingPct.textContent = `Loading… ${pct}%`;
+}
+
+function revealMainMenu() {
+  if (mainMenuShown) return;
+  mainMenuShown = true;
+  setLoadingProgress(1);
+  ui.loadingScreen?.classList.add("hidden");
+  ui.mainMenu?.classList.remove("hidden");
+}
+
+function showHeroSelect() {
+  ui.mainMenu?.classList.add("hidden");
+  ui.leaderboardScreen?.classList.add("hidden");
+  ui.lockPanel?.classList.remove("hidden");
+}
+
+function showMainMenu() {
+  ui.lockPanel?.classList.add("hidden");
+  ui.leaderboardScreen?.classList.add("hidden");
+  ui.mainMenu?.classList.remove("hidden");
+}
+
+function showLeaderboard() {
+  ui.mainMenu?.classList.add("hidden");
+  ui.leaderboardScreen?.classList.remove("hidden");
+}
+
+function setupMenus() {
+  ui.menuPlay?.addEventListener("click", showHeroSelect);
+  ui.menuLeaderboard?.addEventListener("click", showLeaderboard);
+  ui.lbBack?.addEventListener("click", showMainMenu);
+  ui.heroBack?.addEventListener("click", showMainMenu);
+  // Safety: if asset loading stalls, reveal the menu anyway.
+  setTimeout(revealMainMenu, 12000);
 }
 
 function tick() {
