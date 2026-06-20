@@ -431,7 +431,7 @@ function texturedLambert(color, { repeat = 6, contrast = 0.24, bump = 0.35 } = {
 }
 
 const materials = {
-  grass: texturedLambert(0x53785b, { repeat: 26, contrast: 0.34, bump: 0.25 }),
+  grass: texturedLambert(0x2f2a23, { repeat: 26, contrast: 0.3, bump: 0.25 }),
   dirt: texturedLambert(0x6f5f46, { repeat: 14, contrast: 0.3, bump: 0.3 }),
   stone: texturedLambert(0x778076, { repeat: 7, contrast: 0.26, bump: 0.45 }),
   darkStone: texturedLambert(0x4a534f, { repeat: 5, contrast: 0.24, bump: 0.45 }),
@@ -480,6 +480,8 @@ const DUNGEON_MODELS = {
   banner: "/models/dungeon/banner_red.gltf.glb",
   chest: "/models/dungeon/chest_gold.glb",
   candle: "/models/dungeon/candle_lit.gltf.glb",
+  floor: "/models/dungeon/floor_dirt_large.gltf.glb",
+  wall: "/models/dungeon/wall.gltf.glb",
 };
 const dungeonCache = new Map();
 const arenaProps = [];
@@ -534,9 +536,93 @@ function placeProp(key, { x, y = 0, z, targetH = null, scale = null, rotY = 0, f
   return root;
 }
 
+// Pull the first mesh out of a tile model, bake its transform, center X/Z with base at y=0,
+// and give it a cheap Lambert material (keeps the embedded texture) for instancing.
+function extractBakedTile(key) {
+  const gltf = dungeonCache.get(key);
+  if (!gltf) return null;
+  gltf.scene.updateMatrixWorld(true);
+  let mesh = null;
+  gltf.scene.traverse((o) => {
+    if (o.isMesh && !mesh) mesh = o;
+  });
+  if (!mesh) return null;
+  const geometry = mesh.geometry.clone();
+  geometry.applyMatrix4(mesh.matrixWorld);
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const size = bb.getSize(new THREE.Vector3());
+  geometry.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+  const src = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+  const material = new THREE.MeshLambertMaterial({
+    map: src.map || null,
+    color: src.map ? 0xffffff : src.color || 0xffffff,
+  });
+  return { geometry, material, size };
+}
+
+function tileFloor() {
+  const baked = extractBakedTile("floor");
+  if (!baked) return;
+  const step = baked.size.x || 4;
+  const half = 54;
+  const cells = [];
+  for (let x = -half + step / 2; x < half; x += step) {
+    for (let z = -half + step / 2; z < half; z += step) cells.push([x, z]);
+  }
+  const inst = new THREE.InstancedMesh(baked.geometry, baked.material, cells.length);
+  const m = new THREE.Matrix4();
+  const topY = 0.05; // sit just above the (now dark) base plane + courtyard
+  cells.forEach(([x, z], i) => {
+    m.makeTranslation(x, topY - baked.size.y, z);
+    inst.setMatrixAt(i, m);
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  inst.receiveShadow = true;
+  scene.add(inst);
+}
+
+function tileWalls() {
+  const baked = extractBakedTile("wall");
+  if (!baked) return;
+  const w = baked.size.x || 4;
+  const h = baked.size.y || 4;
+  const half = 50;
+  const inner = 47.5;
+  const placements = [];
+  for (let t = -half; t <= half; t += w) {
+    placements.push([t, -inner, 0]);
+    placements.push([t, inner, Math.PI]);
+    placements.push([-inner, t, Math.PI / 2]);
+    placements.push([inner, t, -Math.PI / 2]);
+  }
+  const rows = 2;
+  const inst = new THREE.InstancedMesh(baked.geometry, baked.material, placements.length * rows);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const scl = new THREE.Vector3(1, 1, 1);
+  const pos = new THREE.Vector3();
+  let i = 0;
+  for (const [x, z, ry] of placements) {
+    q.setFromAxisAngle(up, ry);
+    for (let r = 0; r < rows; r++) {
+      pos.set(x, r * h, z);
+      m.compose(pos, q, scl);
+      inst.setMatrixAt(i++, m);
+    }
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  inst.castShadow = true;
+  inst.receiveShadow = true;
+  scene.add(inst);
+}
+
 function dressArena() {
   if (arenaDressed) return;
   arenaDressed = true;
+  tileFloor();
+  tileWalls();
 
   // Torches: swap the procedural flame/glow for a KayKit torch atop the post; keep the light.
   for (const torch of torches) {
