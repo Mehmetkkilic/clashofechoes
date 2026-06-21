@@ -6,7 +6,7 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>Riftbound Arena - Combat Demo</title>
+    <title>Vermincull - Combat Demo</title>
   </head>
   <body>
     <main id="app">
@@ -22,7 +22,7 @@
       <section class="hud top-hud" aria-label="Match status">
         <div>
           <p class="eyebrow">Castle Ruins</p>
-          <h1>Riftbound Arena</h1>
+          <h1>Vermincull</h1>
         </div>
         <div class="stats">
           <div>
@@ -34,6 +34,11 @@
             <strong id="deaths">0</strong>
           </div>
         </div>
+      </section>
+
+      <section class="hud objective-hud" aria-label="Objective">
+        <span class="objective-icon">☣</span>
+        <span>Defeat the Swarm</span>
       </section>
 
       <section class="hud lighting-hud" aria-label="Lighting controls">
@@ -177,13 +182,13 @@
       </section>
 
       <section id="loading-screen" class="menu-screen loading-screen" aria-label="Loading">
-        <strong class="menu-title">Riftbound Arena</strong>
+        <strong class="menu-title">Vermincull</strong>
         <div class="loading-track"><div id="loading-bar" class="loading-fill"></div></div>
         <span id="loading-pct" class="menu-sub">Loading… 0%</span>
       </section>
 
       <section id="main-menu" class="menu-screen hidden" aria-label="Main menu">
-        <strong class="menu-title">Riftbound Arena</strong>
+        <strong class="menu-title">Vermincull</strong>
         <span class="menu-sub">Low-poly hero arena</span>
         <div class="menu-maps" role="group" aria-label="Map">
           <button class="map-button" type="button" data-map="castle">Castle</button>
@@ -203,7 +208,7 @@
 
       <section id="lock-panel" class="lock-panel hidden" aria-label="Choose your hero">
         <button id="hero-back" class="hero-back" type="button" aria-label="Back to menu">‹ Menü</button>
-        <strong class="start-title">Riftbound Arena</strong>
+        <strong class="start-title">Vermincull</strong>
         <canvas id="preview-canvas" class="preview-canvas" aria-hidden="true"></canvas>
         <div class="start-hero">
           <strong id="start-hero-name">Fighter</strong>

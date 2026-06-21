@@ -75,7 +75,7 @@ const mimeTypes = {
 };
 
 server.listen(port, host, () => {
-  console.log(`Riftbound Arena server running on http://${host}:${port}`);
+  console.log(`Vermincull server running on http://${host}:${port}`);
 });
 
 const heartbeatTimer = setInterval(() => {
