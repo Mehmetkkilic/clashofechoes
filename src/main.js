@@ -3,6 +3,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 import "./styles.css";
 
@@ -481,6 +482,7 @@ const TPS_SHOULDER = 0.7;
 const modelCache = new Map();
 const loadingManager = new THREE.LoadingManager();
 const gltfLoader = new GLTFLoader(loadingManager);
+gltfLoader.setMeshoptDecoder(MeshoptDecoder); // optimized character glbs are meshopt-compressed
 loadingManager.onProgress = (_url, loaded, total) => {
   setLoadingProgress(total > 0 ? loaded / total : 0);
 };
@@ -533,6 +535,7 @@ const PROP_HEIGHTS = {
   ribcage: 0.8,
   coffin: 0.9,
   fence: 1.2,
+  banner: 3.2,
 };
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
 let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
@@ -609,6 +612,54 @@ const MAPS = {
       { x: -25, z: 11, y: 4 }, { x: 0, z: 11, y: 4 }, { x: 25, z: 11, y: 4 },
       { x: -25, z: 31, y: 4 }, { x: 0, z: 31, y: 4 }, { x: 25, z: 31, y: 4 },
       { x: 0, z: 43, y: 4 },
+    ],
+  },
+  // Medieval Keep — long central Great Hall + throne, gatehouse, side chambers, corner towers.
+  medieval: {
+    ground: { halfX: 34, halfZ: 44, color: 0x2c2a26 },
+    ceiling: { y: 8 },
+    spawn: { x: 0, z: 35 }, // Gatehouse (entrance, south)
+    walls: [
+      ...roomWalls(-10, -24, 10, 28, { n: 1, s: 1, e: 1, w: 1 }), // Great Hall (long center)
+      ...roomWalls(-10, -42, 10, -26, { s: 1, w: 1, e: 1 }), // Throne Room (N)
+      ...roomWalls(-10, 30, 10, 40, { n: 1 }), // Gatehouse (S, spawn)
+      ...roomWalls(-32, -42, -12, -26, { e: 1, s: 1 }), // NW Tower
+      ...roomWalls(12, -42, 32, -26, { w: 1, s: 1 }), // NE Tower
+      ...roomWalls(-32, -24, -12, -8, { n: 1, s: 1 }), // Armory (W top)
+      ...roomWalls(-32, -6, -12, 10, { e: 1, n: 1, s: 1 }), // Barracks (W mid → hall)
+      ...roomWalls(-32, 12, -12, 28, { n: 1 }), // Stables (W bot)
+      ...roomWalls(12, -24, 32, -8, { n: 1, s: 1 }), // Chapel (E top)
+      ...roomWalls(12, -6, 32, 10, { w: 1, n: 1, s: 1 }), // Tavern (E mid → hall)
+      ...roomWalls(12, 12, 32, 28, { n: 1 }), // Granary (E bot)
+    ],
+    pillars: [],
+    props: [
+      { model: "banner", x: -8, z: -10, rot: Math.PI / 2 }, // Great Hall banners
+      { model: "banner", x: 8, z: -10, rot: -Math.PI / 2 },
+      { model: "banner", x: -8, z: 14, rot: Math.PI / 2 },
+      { model: "banner", x: 8, z: 14, rot: -Math.PI / 2 },
+      { model: "chest", x: 0, z: -36, rot: 0, solid: true }, // Throne
+      { model: "chest", x: -22, z: -36, rot: 0.3, solid: true }, // NW Tower
+      { model: "chest", x: 22, z: -36, rot: -0.3, solid: true }, // NE Tower
+      { model: "barrel", x: -26, z: -16, solid: true }, // Armory
+      { model: "crate", x: -22, z: -19, solid: true },
+      { model: "barrel", x: -26, z: 2, solid: true }, // Barracks
+      { model: "crate", x: -26, z: 20, solid: true }, // Stables
+      { model: "candle", x: 22, z: -16 }, // Chapel
+      { model: "candle", x: 18, z: -12 },
+      { model: "barrel", x: 26, z: 2, solid: true }, // Tavern
+      { model: "crate", x: 26, z: 5, solid: true },
+      { model: "crate", x: 22, z: 20, solid: true }, // Granary
+      { model: "barrel", x: 0, z: 37, solid: true }, // Gatehouse
+    ],
+    torches: [
+      { x: -8, z: -22, y: 4 }, { x: 8, z: -22, y: 4 },
+      { x: -8, z: 2, y: 4 }, { x: 8, z: 2, y: 4 },
+      { x: -8, z: 26, y: 4 }, { x: 8, z: 26, y: 4 },
+      { x: 0, z: -40, y: 4 }, { x: -22, z: -40, y: 4 }, { x: 22, z: -40, y: 4 },
+      { x: -26, z: -16, y: 4 }, { x: -26, z: 2, y: 4 }, { x: -26, z: 20, y: 4 },
+      { x: 26, z: -16, y: 4 }, { x: 26, z: 2, y: 4 }, { x: 26, z: 20, y: 4 },
+      { x: 0, z: 38, y: 4 },
     ],
   },
   dungeon: {
