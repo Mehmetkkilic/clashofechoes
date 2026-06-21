@@ -40,15 +40,17 @@ const botSpawnPoints = [
 const MAP_BOUNDS = {
   castle: { halfX: 47, halfZ: 47, spawns: botSpawnPoints },
   dungeon: {
-    halfX: 11,
+    halfX: 29,
     halfZ: 38,
     spawns: [
-      { x: -7, z: -30 },
-      { x: 7, z: -30 },
-      { x: -7, z: 0 },
-      { x: 7, z: 0 },
-      { x: 0, z: 28 },
-      { x: 0, z: -10 },
+      { x: 0, z: 0 },     // Grand Chamber (center)
+      { x: 19, z: 0 },    // Shrine of Dawn (E)
+      { x: 0, z: -25 },   // Alchemy Lab (N)
+      { x: 19, z: 25 },   // Boss Lair (SE)
+      { x: -19, z: 25 },  // Prison (SW)
+      { x: 19, z: -25 },  // Treasure Vault (NE)
+      { x: -19, z: -25 }, // Storage (NW)
+      { x: 0, z: 25 },    // Hall of Traps (S)
     ],
   },
 };
