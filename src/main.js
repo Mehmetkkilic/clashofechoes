@@ -559,6 +559,58 @@ function roomWalls(minX, minZ, maxX, maxZ, doors = {}) {
 }
 
 const MAPS = {
+  // Castle Drakenhall — 13-room floor-plan (3x4 grid + gatehouse), centered doors.
+  castle: {
+    ground: { halfX: 39, halfZ: 47, color: 0x2a2622 },
+    ceiling: { y: 8 },
+    spawn: { x: 0, z: 40 }, // Gatehouse (entrance, south)
+    walls: [
+      // North row
+      ...roomWalls(-37, -45, -13, -27, { e: 1, s: 1 }), // Armory (NW)
+      ...roomWalls(-11, -45, 11, -27, { w: 1, e: 1, s: 1 }), // Throne Room (N)
+      ...roomWalls(13, -45, 37, -27, { w: 1, s: 1 }), // Treasury (NE)
+      // Upper-mid row
+      ...roomWalls(-37, -25, -13, -7, { e: 1, n: 1, s: 1 }), // Barracks (W)
+      ...roomWalls(-11, -25, 11, -7, { w: 1, e: 1, n: 1, s: 1 }), // Great Hall (center)
+      ...roomWalls(13, -25, 37, -7, { w: 1, n: 1, s: 1 }), // Library (E)
+      // Lower-mid row
+      ...roomWalls(-37, -5, -13, 13, { e: 1, n: 1, s: 1 }), // Kitchen (W)
+      ...roomWalls(-11, -5, 11, 13, { w: 1, e: 1, n: 1, s: 1 }), // Chapel (center)
+      ...roomWalls(13, -5, 37, 13, { w: 1, n: 1, s: 1 }), // War Room (E)
+      // South row
+      ...roomWalls(-37, 15, -13, 33, { e: 1, n: 1 }), // Stables (SW)
+      ...roomWalls(-11, 15, 11, 33, { w: 1, e: 1, n: 1, s: 1 }), // Courtyard (center)
+      ...roomWalls(13, 15, 37, 33, { w: 1, n: 1 }), // Guard Hall (SE)
+      // Gatehouse (entrance)
+      ...roomWalls(-11, 35, 11, 45, { n: 1 }),
+    ],
+    pillars: [],
+    props: [
+      { model: "chest", x: 0, z: -36, rot: 0, solid: true }, // Throne Room
+      { model: "chest", x: 25, z: -36, rot: -0.3, solid: true }, // Treasury
+      { model: "chest", x: 30, z: -32, rot: 0.4, solid: true },
+      { model: "barrel", x: -30, z: -36, solid: true }, // Armory
+      { model: "crate", x: -25, z: -32, solid: true },
+      { model: "barrel", x: -30, z: -16, solid: true }, // Barracks
+      { model: "crate", x: -28, z: 4, solid: true }, // Kitchen
+      { model: "barrel", x: -22, z: 8, solid: true },
+      { model: "crate", x: -30, z: 24, solid: true }, // Stables
+      { model: "candle", x: -4, z: 8 }, // Chapel
+      { model: "candle", x: 4, z: 8 },
+      { model: "gravestone", x: 0, z: 10, rot: 0 },
+      { model: "barrel", x: 28, z: 4, solid: true }, // War Room
+      { model: "ribcage", x: 24, z: 24 }, // Guard Hall
+      { model: "bone", x: 6, z: 30, rot: 0.6 }, // Courtyard
+      { model: "barrel", x: 0, z: 42, solid: true }, // Gatehouse
+    ],
+    torches: [
+      { x: -25, z: -29, y: 4 }, { x: 0, z: -29, y: 4 }, { x: 25, z: -29, y: 4 },
+      { x: -25, z: -9, y: 4 }, { x: 0, z: -9, y: 4 }, { x: 25, z: -9, y: 4 },
+      { x: -25, z: 11, y: 4 }, { x: 0, z: 11, y: 4 }, { x: 25, z: 11, y: 4 },
+      { x: -25, z: 31, y: 4 }, { x: 0, z: 31, y: 4 }, { x: 25, z: 31, y: 4 },
+      { x: 0, z: 43, y: 4 },
+    ],
+  },
   dungeon: {
     ground: { halfX: 30, halfZ: 40, color: 0x241f19 }, // floor-plan footprint
     ceiling: { y: 8 },
@@ -804,7 +856,7 @@ function scatterPlagueProps(list) {
 }
 
 function onDungeonAssetsReady() {
-  if (MAP_ID === "castle" || !MAPS[MAP_ID]) dressArena();
+  if (!MAPS[MAP_ID]) dressArena();
   else buildMapDressing(MAPS[MAP_ID]);
 }
 
@@ -1064,7 +1116,7 @@ function updateChar(char, dt, moving) {
 init();
 
 function init() {
-  const customMap = MAP_ID !== "castle" && MAPS[MAP_ID];
+  const customMap = !!MAPS[MAP_ID];
   setupWorld();
   if (!customMap) setupLights();
   setupPostProcessing();

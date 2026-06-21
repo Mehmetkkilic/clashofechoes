@@ -38,7 +38,20 @@ const botSpawnPoints = [
 
 // Per-map bot bounds + spawn points. The map id is the room name suffix after ":".
 const MAP_BOUNDS = {
-  castle: { halfX: 47, halfZ: 47, spawns: botSpawnPoints },
+  castle: {
+    halfX: 37,
+    halfZ: 45,
+    spawns: [
+      { x: 0, z: -16 },   // Great Hall (center)
+      { x: 0, z: 4 },     // Chapel (center)
+      { x: 0, z: 24 },    // Courtyard (center)
+      { x: 0, z: -36 },   // Throne Room (N)
+      { x: -25, z: 4 },   // Kitchen (W)
+      { x: 25, z: 4 },    // War Room (E)
+      { x: -25, z: -16 }, // Barracks (W)
+      { x: 25, z: -16 },  // Library (E)
+    ],
+  },
   dungeon: {
     halfX: 29,
     halfZ: 38,
