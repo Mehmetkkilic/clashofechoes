@@ -1196,7 +1196,7 @@ body.touch.playing .mobile-actions {
 
 .menu-maps {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 8px;
   width: 100%;
 }
