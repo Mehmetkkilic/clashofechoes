@@ -498,7 +498,12 @@ const DUNGEON_MODELS = {
   chest: "/models/dungeon/chest_gold.glb",
   candle: "/models/dungeon/candle_lit.gltf.glb",
   floor: "/models/dungeon/floor_dirt_large.gltf.glb",
+  floortile: "/models/dungeon/floor_tile_large.gltf.glb",
+  floorwood: "/models/dungeon/floor_wood_large.gltf.glb",
   wall: "/models/dungeon/wall.gltf.glb",
+  wall_arched: "/models/dungeon/wall_arched.gltf.glb",
+  wall_pillar: "/models/dungeon/wall_pillar.gltf.glb",
+  wall_cracked: "/models/dungeon/wall_cracked.gltf.glb",
   gravestone: "/models/halloween/gravestone.gltf",
   grave: "/models/halloween/grave_A.gltf",
   gravemarker: "/models/halloween/gravemarker_A.gltf",
@@ -565,6 +570,7 @@ const MAPS = {
   // Castle Drakenhall — 13-room floor-plan (3x4 grid + gatehouse), centered doors.
   castle: {
     ground: { halfX: 39, halfZ: 47, color: 0x2a2622 },
+    tiles: { floor: "floortile", wall: "wall_arched" }, // polished stone + arched walls
     ceiling: { y: 8 },
     spawn: { x: 0, z: 40 }, // Gatehouse (entrance, south)
     walls: [
@@ -617,6 +623,7 @@ const MAPS = {
   // Medieval Keep — long central Great Hall + throne, gatehouse, side chambers, corner towers.
   medieval: {
     ground: { halfX: 34, halfZ: 44, color: 0x2c2a26 },
+    tiles: { floor: "floorwood", wall: "wall_pillar" }, // timber floor + posted walls
     ceiling: { y: 8 },
     spawn: { x: 0, z: 35 }, // Gatehouse (entrance, south)
     walls: [
@@ -664,6 +671,7 @@ const MAPS = {
   },
   dungeon: {
     ground: { halfX: 30, halfZ: 40, color: 0x241f19 }, // floor-plan footprint
+    tiles: { floor: "floor", wall: "wall_cracked" }, // dirt floor + decayed cracked walls
     ceiling: { y: 8 },
     spawn: { x: -19, z: 0 }, // Guard Room (entrance, west)
     walls: [
@@ -911,8 +919,8 @@ function onDungeonAssetsReady() {
   else buildMapDressing(MAPS[MAP_ID]);
 }
 
-function tileFloorArea(halfX, halfZ, topY = 0.05, faceDown = false) {
-  const baked = extractBakedTile("floor");
+function tileFloorArea(halfX, halfZ, topY = 0.05, faceDown = false, floorKey = "floor") {
+  const baked = extractBakedTile(floorKey) || extractBakedTile("floor");
   if (!baked) return;
   const step = baked.size.x || 4;
   const cells = [];
@@ -935,8 +943,8 @@ function tileFloorArea(halfX, halfZ, topY = 0.05, faceDown = false) {
   scene.add(inst);
 }
 
-function tileWallsRect(minX, maxX, minZ, maxZ, rows = 2) {
-  const baked = extractBakedTile("wall");
+function tileWallsRect(minX, maxX, minZ, maxZ, rows = 2, wallKey = "wall") {
+  const baked = extractBakedTile(wallKey) || extractBakedTile("wall");
   if (!baked) return;
   const w = baked.size.x || 4;
   const h = baked.size.y || 4;
@@ -1016,8 +1024,8 @@ function addWallSegmentCollider(w) {
 }
 
 // Tile KayKit wall pieces along a segment (visual; matches addWallSegmentCollider).
-function tileWallSegment(w, rows = 2) {
-  const baked = extractBakedTile("wall");
+function tileWallSegment(w, rows = 2, wallKey = "wall") {
+  const baked = extractBakedTile(wallKey) || extractBakedTile("wall");
   if (!baked) return;
   const tw = baked.size.x || 4;
   const th = baked.size.y || 4;
@@ -1045,10 +1053,12 @@ function buildMapDressing(def) {
   if (arenaDressed) return;
   arenaDressed = true;
   const g = def.ground;
-  tileFloorArea(g.halfX, g.halfZ);
-  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2);
-  if (def.ceiling) tileFloorArea(g.halfX, g.halfZ, def.ceiling.y ?? 8, true); // stone roof
-  for (const w of def.walls || []) tileWallSegment(w); // interior room walls
+  const floorKey = def.tiles?.floor ?? "floor";
+  const wallKey = def.tiles?.wall ?? "wall";
+  tileFloorArea(g.halfX, g.halfZ, 0.05, false, floorKey);
+  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2, wallKey);
+  if (def.ceiling) tileFloorArea(g.halfX, g.halfZ, def.ceiling.y ?? 8, true, floorKey); // stone roof
+  for (const w of def.walls || []) tileWallSegment(w, 2, wallKey); // interior room walls
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
     placeProp(pr.model, {
