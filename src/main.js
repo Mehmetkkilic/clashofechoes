@@ -501,10 +501,55 @@ const dungeonCache = new Map();
 const arenaProps = [];
 let arenaDressed = false;
 
+/*
+ * ---- MAP AUTHORING -------------------------------------------------------
+ * Add a map to MAPS, then load it with ?map=<id>. Collision is generated
+ * automatically from the same data (no hand-written colliders).
+ *   ground : { halfX, halfZ, color }   -> dark base + floor tiles + perimeter walls
+ *   spawn  : { x, z }                  -> where the player starts/respawns
+ *   walls  : [ { x, z, w, d, h } ]     -> extra interior wall colliders
+ *   pillars: [ { x, z, r, h } ]        -> KayKit column + circle collider
+ *   props  : [ { model, x, z, y?, rot?, solid? } ]  (chest/barrel/crate/candle)
+ *   torches: [ { x, z, y? } ]          -> point light + KayKit torch
+ * -------------------------------------------------------------------------
+ */
+const PROP_HEIGHTS = { chest: 1.3, barrel: 1.6, crate: 1.9, candle: 0.7 };
+const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
+let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
+
+const MAPS = {
+  dungeon: {
+    ground: { halfX: 22, halfZ: 22, color: 0x241f19 },
+    spawn: { x: 0, z: 14 },
+    walls: [],
+    pillars: [
+      { x: -10, z: -10, r: 1.3, h: 8 },
+      { x: 10, z: -10, r: 1.3, h: 8 },
+      { x: -10, z: 10, r: 1.3, h: 8 },
+      { x: 10, z: 10, r: 1.3, h: 8 },
+    ],
+    props: [
+      { model: "chest", x: 0, z: 0, rot: 0.4, solid: true },
+      { model: "barrel", x: -17, z: -17, solid: true },
+      { model: "crate", x: 17, z: 17, solid: true },
+      { model: "barrel", x: 17, z: -17, solid: true },
+      { model: "candle", x: -17, z: 17 },
+    ],
+    torches: [
+      { x: -20, z: -20, y: 4 },
+      { x: 20, z: -20, y: 4 },
+      { x: -20, z: 20, y: 4 },
+      { x: 20, z: 20, y: 4 },
+      { x: 0, z: -20.5, y: 4 },
+      { x: 0, z: 20.5, y: 4 },
+    ],
+  },
+};
+
 function loadDungeonModels() {
   let remaining = Object.keys(DUNGEON_MODELS).length;
   const done = () => {
-    if (--remaining <= 0) dressArena();
+    if (--remaining <= 0) onDungeonAssetsReady();
   };
   for (const [key, url] of Object.entries(DUNGEON_MODELS)) {
     gltfLoader.load(
@@ -686,6 +731,122 @@ function dressArena() {
   placeProp("candle", { x: 13, y: 7.2, z: 10, targetH: 0.7 });
 }
 
+function onDungeonAssetsReady() {
+  if (MAP_ID === "castle" || !MAPS[MAP_ID]) dressArena();
+  else buildMapDressing(MAPS[MAP_ID]);
+}
+
+function tileFloorArea(halfX, halfZ) {
+  const baked = extractBakedTile("floor");
+  if (!baked) return;
+  const step = baked.size.x || 4;
+  const cells = [];
+  for (let x = -halfX + step / 2; x < halfX; x += step) {
+    for (let z = -halfZ + step / 2; z < halfZ; z += step) cells.push([x, z]);
+  }
+  const inst = new THREE.InstancedMesh(baked.geometry, baked.material, cells.length);
+  const m = new THREE.Matrix4();
+  cells.forEach(([x, z], i) => {
+    m.makeTranslation(x, 0.05 - baked.size.y, z);
+    inst.setMatrixAt(i, m);
+  });
+  inst.instanceMatrix.needsUpdate = true;
+  inst.receiveShadow = true;
+  scene.add(inst);
+}
+
+function tileWallsRect(minX, maxX, minZ, maxZ, rows = 2) {
+  const baked = extractBakedTile("wall");
+  if (!baked) return;
+  const w = baked.size.x || 4;
+  const h = baked.size.y || 4;
+  const placements = [];
+  for (let x = minX; x <= maxX; x += w) {
+    placements.push([x, minZ, 0]);
+    placements.push([x, maxZ, Math.PI]);
+  }
+  for (let z = minZ; z <= maxZ; z += w) {
+    placements.push([minX, z, Math.PI / 2]);
+    placements.push([maxX, z, -Math.PI / 2]);
+  }
+  const inst = new THREE.InstancedMesh(baked.geometry, baked.material, placements.length * rows);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const up = new THREE.Vector3(0, 1, 0);
+  const scl = new THREE.Vector3(1, 1, 1);
+  const pos = new THREE.Vector3();
+  let i = 0;
+  for (const [x, z, ry] of placements) {
+    q.setFromAxisAngle(up, ry);
+    for (let r = 0; r < rows; r++) {
+      pos.set(x, r * h, z);
+      m.compose(pos, q, scl);
+      inst.setMatrixAt(i++, m);
+    }
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  inst.castShadow = true;
+  inst.receiveShadow = true;
+  scene.add(inst);
+}
+
+// Build a map's gameplay collision + spawn + lights from its data (visuals come later).
+function buildMapCollision(def) {
+  const g = def.ground;
+  spawnPoint = new THREE.Vector3(def.spawn?.x ?? 0, PLAYER_EYE_HEIGHT, def.spawn?.z ?? 0);
+  player.position.copy(spawnPoint);
+
+  const base = new THREE.Mesh(
+    new THREE.PlaneGeometry(g.halfX * 2 + 8, g.halfZ * 2 + 8),
+    new THREE.MeshLambertMaterial({ color: g.color ?? 0x241f19 })
+  );
+  base.rotation.x = -Math.PI / 2;
+  base.receiveShadow = true;
+  scene.add(base);
+  addWalkRect(0, 0, (g.halfX + 6) * 2, (g.halfZ + 6) * 2, 0);
+
+  const th = 1.5;
+  const wallH = 8;
+  addBoxCollider(0, -g.halfZ, g.halfX * 2, th, 0, wallH);
+  addBoxCollider(0, g.halfZ, g.halfX * 2, th, 0, wallH);
+  addBoxCollider(-g.halfX, 0, th, g.halfZ * 2, 0, wallH);
+  addBoxCollider(g.halfX, 0, th, g.halfZ * 2, 0, wallH);
+
+  for (const w of def.walls || []) addBoxCollider(w.x, w.z, w.w, w.d, 0, w.h ?? 8);
+  for (const p of def.pillars || []) addCircleCollider(p.x, p.z, p.r ?? 1.2, 0, p.h ?? 8);
+  for (const pr of def.props || []) {
+    if (pr.solid) addBoxCollider(pr.x, pr.z, 1.4, 1.4, 0, 1.4);
+  }
+  for (const t of def.torches || []) createTorch(t.x, t.y ?? 4, t.z);
+}
+
+// Apply a map's KayKit visuals once the dungeon models are loaded.
+function buildMapDressing(def) {
+  if (arenaDressed) return;
+  arenaDressed = true;
+  const g = def.ground;
+  tileFloorArea(g.halfX, g.halfZ);
+  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2);
+  for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
+  for (const pr of def.props || []) {
+    placeProp(pr.model, {
+      x: pr.x,
+      z: pr.z,
+      y: pr.y ?? 0,
+      rotY: pr.rot ?? 0,
+      targetH: PROP_HEIGHTS[pr.model] ?? 1.3,
+    });
+  }
+  for (const torch of torches) {
+    const p = torch.light.position;
+    const model = placeProp("torch", { x: p.x, y: Math.max(1.25, p.y - 0.55) - 0.2, z: p.z, targetH: 1.5 });
+    if (model) {
+      torch.flame.visible = false;
+      torch.glow.visible = false;
+    }
+  }
+}
+
 function loadCharacterModels() {
   for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
     gltfLoader.load(
@@ -776,12 +937,14 @@ function updateChar(char, dt, moving) {
 init();
 
 function init() {
+  const customMap = MAP_ID !== "castle" && MAPS[MAP_ID];
   setupWorld();
-  setupLights();
+  if (!customMap) setupLights();
   setupPostProcessing();
   loadCharacterModels();
   applyLightingSettings();
-  setupArena();
+  if (customMap) buildMapCollision(MAPS[MAP_ID]);
+  else setupArena();
   loadDungeonModels();
   setupPlayerWeapon();
   spawnEnemies();
@@ -1952,44 +2115,46 @@ function setupLights() {
     [-30, 3.2, 39],
   ];
 
-  torchPositions.forEach(([x, y, z]) => {
-    const flame = new THREE.PointLight(0xff8f46, 5.6, 27, 1.65);
-    flame.position.set(x, y, z);
-    flame.castShadow = false;
-    scene.add(flame);
+  torchPositions.forEach(([x, y, z]) => createTorch(x, y, z));
+}
 
-    const mesh = new THREE.Mesh(
-      new THREE.ConeGeometry(0.3, 0.86, 6),
-      new THREE.MeshBasicMaterial({ color: 0xff8f46 })
-    );
-    mesh.position.copy(flame.position);
-    scene.add(mesh);
+function createTorch(x, y, z) {
+  const flame = new THREE.PointLight(0xff8f46, 5.6, 27, 1.65);
+  flame.position.set(x, y, z);
+  flame.castShadow = false;
+  scene.add(flame);
 
-    const glow = new THREE.Mesh(
-      new THREE.SphereGeometry(1.15, 10, 8),
-      new THREE.MeshBasicMaterial({
-        color: 0xff8f46,
-        transparent: true,
-        opacity: 0.13,
-        depthWrite: false,
-      })
-    );
-    glow.position.copy(flame.position);
-    scene.add(glow);
+  const mesh = new THREE.Mesh(
+    new THREE.ConeGeometry(0.3, 0.86, 6),
+    new THREE.MeshBasicMaterial({ color: 0xff8f46 })
+  );
+  mesh.position.copy(flame.position);
+  scene.add(mesh);
 
-    const postHeight = Math.max(1.25, y - 0.55);
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, postHeight, 6), materials.wood);
-    post.position.set(x, postHeight / 2, z);
-    post.castShadow = true;
-    scene.add(post);
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(1.15, 10, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xff8f46,
+      transparent: true,
+      opacity: 0.13,
+      depthWrite: false,
+    })
+  );
+  glow.position.copy(flame.position);
+  scene.add(glow);
 
-    torches.push({
-      light: flame,
-      flame: mesh,
-      glow,
-      baseIntensity: flame.intensity,
-      phase: Math.random() * Math.PI * 2,
-    });
+  const postHeight = Math.max(1.25, y - 0.55);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, postHeight, 6), materials.wood);
+  post.position.set(x, postHeight / 2, z);
+  post.castShadow = true;
+  scene.add(post);
+
+  torches.push({
+    light: flame,
+    flame: mesh,
+    glow,
+    baseIntensity: flame.intensity,
+    phase: Math.random() * Math.PI * 2,
   });
 }
 
@@ -4318,7 +4483,7 @@ function damagePlayer(amount, enemy) {
 }
 
 function respawnPlayer() {
-  player.position.set(0, PLAYER_EYE_HEIGHT, 18);
+  player.position.copy(spawnPoint);
   player.velocity.set(0, 0, 0);
   player.maxHp = classBaseHp() + mods.maxHpBonus;
   player.hp = player.maxHp;
