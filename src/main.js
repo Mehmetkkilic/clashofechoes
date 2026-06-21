@@ -542,16 +542,12 @@ const MAPS = {
     ground: { halfX: 12, halfZ: 40, color: 0x241f19 }, // long ~24x80 hall
     ceiling: { y: 8 },
     spawn: { x: 0, z: 34 },
-    walls: [],
-    pillars: [
-      { x: -6, z: -33 }, { x: 6, z: -33 },
-      { x: -6, z: -22 }, { x: 6, z: -22 },
-      { x: -6, z: -11 }, { x: 6, z: -11 },
-      { x: -6, z: 0 }, { x: 6, z: 0 },
-      { x: -6, z: 11 }, { x: 6, z: 11 },
-      { x: -6, z: 22 }, { x: 6, z: 22 },
-      { x: -6, z: 33 }, { x: 6, z: 33 },
+    // Interior cross-walls split the hall into 3 connected rooms (central doorway gap x=-3..3).
+    walls: [
+      { x1: -12, z1: -13, x2: -3, z2: -13 }, { x1: 3, z1: -13, x2: 12, z2: -13 },
+      { x1: -12, z1: 13, x2: -3, z2: 13 }, { x1: 3, z1: 13, x2: 12, z2: 13 },
     ],
+    pillars: [],
     props: [
       { model: "chest", x: 0, z: -36, rot: 0.3, solid: true },
       { model: "chest", x: 0, z: 0, rot: -0.4, solid: true },
@@ -864,12 +860,52 @@ function buildMapCollision(def) {
   addBoxCollider(-g.halfX, 0, th, g.halfZ * 2, 0, wallH);
   addBoxCollider(g.halfX, 0, th, g.halfZ * 2, 0, wallH);
 
-  for (const w of def.walls || []) addBoxCollider(w.x, w.z, w.w, w.d, 0, w.h ?? 8);
+  for (const w of def.walls || []) addWallSegmentCollider(w);
   for (const p of def.pillars || []) addCircleCollider(p.x, p.z, p.r ?? 1.2, 0, p.h ?? 8);
   for (const pr of def.props || []) {
     if (pr.solid) addBoxCollider(pr.x, pr.z, 1.4, 1.4, 0, 1.4);
   }
   for (const t of def.torches || []) createTorch(t.x, t.y ?? 4, t.z);
+}
+
+// Axis-aligned wall segment {x1,z1,x2,z2,h?} -> box collider matching the tiled visual.
+function addWallSegmentCollider(w) {
+  const horizontal = Math.abs(w.x2 - w.x1) >= Math.abs(w.z2 - w.z1);
+  const len = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+  const th = 1.2;
+  addBoxCollider(
+    (w.x1 + w.x2) / 2,
+    (w.z1 + w.z2) / 2,
+    horizontal ? len : th,
+    horizontal ? th : len,
+    0,
+    w.h ?? 8
+  );
+}
+
+// Tile KayKit wall pieces along a segment (visual; matches addWallSegmentCollider).
+function tileWallSegment(w, rows = 2) {
+  const baked = extractBakedTile("wall");
+  if (!baked) return;
+  const tw = baked.size.x || 4;
+  const th = baked.size.y || 4;
+  const len = Math.hypot(w.x2 - w.x1, w.z2 - w.z1);
+  const n = Math.max(1, Math.round(len / tw));
+  const horizontal = Math.abs(w.x2 - w.x1) >= Math.abs(w.z2 - w.z1);
+  const ry = horizontal ? 0 : Math.PI / 2;
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const x = w.x1 + (w.x2 - w.x1) * t;
+    const z = w.z1 + (w.z2 - w.z1) * t;
+    for (let r = 0; r < rows; r++) {
+      const mesh = new THREE.Mesh(baked.geometry, baked.material);
+      mesh.position.set(x, r * th, z);
+      mesh.rotation.y = ry;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      scene.add(mesh);
+    }
+  }
 }
 
 // Apply a map's KayKit visuals once the dungeon models are loaded.
@@ -880,6 +916,7 @@ function buildMapDressing(def) {
   tileFloorArea(g.halfX, g.halfZ);
   tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2);
   if (def.ceiling) tileFloorArea(g.halfX, g.halfZ, def.ceiling.y ?? 8, true); // stone roof
+  for (const w of def.walls || []) tileWallSegment(w); // interior room walls
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
     placeProp(pr.model, {
