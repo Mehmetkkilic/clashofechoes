@@ -539,30 +539,42 @@ let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 
 const MAPS = {
   dungeon: {
-    ground: { halfX: 22, halfZ: 22, color: 0x241f19 },
+    ground: { halfX: 12, halfZ: 40, color: 0x241f19 }, // long ~24x80 hall
     ceiling: { y: 8 },
-    spawn: { x: 0, z: 14 },
+    spawn: { x: 0, z: 34 },
     walls: [],
     pillars: [
-      { x: -10, z: -10, r: 1.3, h: 8 },
-      { x: 10, z: -10, r: 1.3, h: 8 },
-      { x: -10, z: 10, r: 1.3, h: 8 },
-      { x: 10, z: 10, r: 1.3, h: 8 },
+      { x: -6, z: -33 }, { x: 6, z: -33 },
+      { x: -6, z: -22 }, { x: 6, z: -22 },
+      { x: -6, z: -11 }, { x: 6, z: -11 },
+      { x: -6, z: 0 }, { x: 6, z: 0 },
+      { x: -6, z: 11 }, { x: 6, z: 11 },
+      { x: -6, z: 22 }, { x: 6, z: 22 },
+      { x: -6, z: 33 }, { x: 6, z: 33 },
     ],
     props: [
-      { model: "chest", x: 0, z: 0, rot: 0.4, solid: true },
-      { model: "barrel", x: -17, z: -17, solid: true },
-      { model: "crate", x: 17, z: 17, solid: true },
-      { model: "barrel", x: 17, z: -17, solid: true },
-      { model: "candle", x: -17, z: 17 },
+      { model: "chest", x: 0, z: -36, rot: 0.3, solid: true },
+      { model: "chest", x: 0, z: 0, rot: -0.4, solid: true },
+      { model: "barrel", x: -10, z: -28, solid: true },
+      { model: "crate", x: 10, z: -16, solid: true },
+      { model: "barrel", x: 10, z: 8, solid: true },
+      { model: "crate", x: -10, z: 20, solid: true },
+      { model: "gravestone", x: -9, z: -33, rot: 0.2 },
+      { model: "grave", x: 9, z: -25, rot: 0.1 },
+      { model: "ribcage", x: -9, z: -6, rot: 0.3 },
+      { model: "bone", x: 9, z: 2, rot: 1.0 },
+      { model: "coffin", x: -9, z: 14, rot: 0.6 },
+      { model: "gravemarker", x: 9, z: 26, rot: -0.3 },
+      { model: "bone", x: -9, z: 32, rot: 0.5 },
+      { model: "candle", x: 9, z: -36 },
     ],
     torches: [
-      { x: -20, z: -20, y: 4 },
-      { x: 20, z: -20, y: 4 },
-      { x: -20, z: 20, y: 4 },
-      { x: 20, z: 20, y: 4 },
-      { x: 0, z: -20.5, y: 4 },
-      { x: 0, z: 20.5, y: 4 },
+      { x: -11, z: -33, y: 4 }, { x: 11, z: -33, y: 4 },
+      { x: -11, z: -19, y: 4 }, { x: 11, z: -19, y: 4 },
+      { x: -11, z: -5, y: 4 }, { x: 11, z: -5, y: 4 },
+      { x: -11, z: 9, y: 4 }, { x: 11, z: 9, y: 4 },
+      { x: -11, z: 23, y: 4 }, { x: 11, z: 23, y: 4 },
+      { x: -11, z: 36, y: 4 }, { x: 11, z: 36, y: 4 },
     ],
   },
 };
@@ -878,10 +890,6 @@ function buildMapDressing(def) {
       targetH: PROP_HEIGHTS[pr.model] ?? 1.3,
     });
   }
-  scatterPlagueProps([
-    ["gravestone", -14, -8, 0.3], ["ribcage", 13, 9, 0.2], ["bone", -10, 13, 1.0],
-    ["coffin", 14, -13, 0.7], ["gravemarker", 8, 4, -0.4], ["bone", -15, -14, 0.5],
-  ]);
   for (const torch of torches) {
     const p = torch.light.position;
     const model = placeProp("torch", { x: p.x, y: Math.max(1.25, p.y - 0.55) - 0.2, z: p.z, targetH: 1.5 });
