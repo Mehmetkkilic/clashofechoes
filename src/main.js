@@ -474,6 +474,7 @@ const ATTACK_CLIP = {
 };
 const MODEL_TARGET_HEIGHT = 1.85;
 const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
+const CHARACTER_FOOT_LIFT = 0.08; // lift feet onto the floor tiles (avoid sinking)
 const TPS_DISTANCE = 4.5;
 const TPS_FOCUS_Y = 0.4;
 const TPS_SHOULDER = 0.7;
@@ -520,6 +521,7 @@ let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 const MAPS = {
   dungeon: {
     ground: { halfX: 22, halfZ: 22, color: 0x241f19 },
+    ceiling: { y: 8.5, color: 0x17130f },
     spawn: { x: 0, z: 14 },
     walls: [],
     pillars: [
@@ -805,6 +807,16 @@ function buildMapCollision(def) {
   scene.add(base);
   addWalkRect(0, 0, (g.halfX + 6) * 2, (g.halfZ + 6) * 2, 0);
 
+  if (def.ceiling) {
+    const ceiling = new THREE.Mesh(
+      new THREE.PlaneGeometry(g.halfX * 2 + 4, g.halfZ * 2 + 4),
+      new THREE.MeshLambertMaterial({ color: def.ceiling.color ?? 0x17130f, side: THREE.DoubleSide })
+    );
+    ceiling.rotation.x = Math.PI / 2; // face down
+    ceiling.position.y = def.ceiling.y ?? 8.5;
+    scene.add(ceiling);
+  }
+
   const th = 1.5;
   const wallH = 8;
   addBoxCollider(0, -g.halfZ, g.halfX * 2, th, 0, wallH);
@@ -871,7 +883,7 @@ function makeCharInstance(key) {
   root.scale.setScalar(scale);
   root.updateMatrixWorld(true);
   const grounded = new THREE.Box3().setFromObject(root);
-  root.position.y = -grounded.min.y;
+  root.position.y = -grounded.min.y + CHARACTER_FOOT_LIFT;
   root.rotation.y = MODEL_FACING_YAW;
   root.traverse((o) => {
     if (o.isMesh) {
@@ -890,7 +902,15 @@ function makeCharInstance(key) {
     run: action("Running_A") || action("Walking_A"),
     attack: action(ATTACK_CLIP[key]) || action("1H_Melee_Attack_Chop") || action("Unarmed_Melee_Attack_Punch_A"),
   };
-  const char = { root, mixer, actions, currentLoco: null, attacking: false, attackTimer: 0 };
+  const char = {
+    root,
+    mixer,
+    actions,
+    footOffset: root.position.y,
+    currentLoco: null,
+    attacking: false,
+    attackTimer: 0,
+  };
   if (actions.idle) {
     actions.idle.play();
     char.currentLoco = actions.idle;
@@ -2312,12 +2332,36 @@ function addRuins() {
 
   ruinSpecs.forEach(([x, z, w, d, h]) => addBlock(x, z, w, d, h, h / 2, materials.stone));
 
-  const centerObelisk = new THREE.Mesh(new THREE.ConeGeometry(3.2, 8.5, 5), materials.darkStone);
-  centerObelisk.position.set(0, 4.25, 0);
-  centerObelisk.castShadow = true;
-  centerObelisk.receiveShadow = true;
-  scene.add(centerObelisk);
-  addCircleCollider(0, 0, 2.8, 0, 8.5);
+  addStonehenge(0, 0, 5.5, 8);
+}
+
+// Ring of standing stones with lintels at the arena center (open, walkable interior).
+function addStonehenge(cx, cz, radius, count) {
+  const upW = 1.7;
+  const upH = 5;
+  const upD = 1.1;
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    const x = cx + Math.cos(a) * radius;
+    const z = cz + Math.sin(a) * radius;
+    const stone = new THREE.Mesh(new THREE.BoxGeometry(upW, upH, upD), materials.stone);
+    stone.position.set(x, upH / 2, z);
+    stone.rotation.y = -a;
+    stone.castShadow = true;
+    stone.receiveShadow = true;
+    scene.add(stone);
+    addCircleCollider(x, z, 1.0, 0, upH);
+
+    const a2 = ((i + 1) / count) * Math.PI * 2;
+    const mid = (a + a2) / 2;
+    const chord = 2 * radius * Math.sin(Math.PI / count);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(chord + 0.4, 0.8, upD * 1.05), materials.darkStone);
+    lintel.position.set(cx + Math.cos(mid) * radius, upH + 0.4, cz + Math.sin(mid) * radius);
+    lintel.rotation.y = -mid + Math.PI / 2;
+    lintel.castShadow = true;
+    lintel.receiveShadow = true;
+    scene.add(lintel);
+  }
 }
 
 function addArcherPlatforms() {
@@ -3678,7 +3722,7 @@ function updateLocalPlayerModel(dt) {
   if (!visible) return;
   localChar.root.position.set(
     player.position.x,
-    player.position.y - PLAYER_EYE_HEIGHT,
+    player.position.y - PLAYER_EYE_HEIGHT + localChar.footOffset,
     player.position.z
   );
   localChar.root.rotation.y = yaw + MODEL_FACING_YAW;
