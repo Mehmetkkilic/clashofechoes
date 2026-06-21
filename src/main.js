@@ -537,40 +537,121 @@ const PROP_HEIGHTS = {
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
 let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 
+// Emit the 4 wall segments of a room; sides with a door get a centered gap.
+function roomWalls(minX, minZ, maxX, maxZ, doors = {}) {
+  const dw = 2.6; // door half-width
+  const cx = (minX + maxX) / 2;
+  const cz = (minZ + maxZ) / 2;
+  const segs = [];
+  // north (z=minZ) and south (z=maxZ): run along x
+  for (const [z, hasDoor] of [[minZ, doors.n], [maxZ, doors.s]]) {
+    if (hasDoor) {
+      segs.push({ x1: minX, z1: z, x2: cx - dw, z2: z }, { x1: cx + dw, z1: z, x2: maxX, z2: z });
+    } else segs.push({ x1: minX, z1: z, x2: maxX, z2: z });
+  }
+  // west (x=minX) and east (x=maxX): run along z
+  for (const [x, hasDoor] of [[minX, doors.w], [maxX, doors.e]]) {
+    if (hasDoor) {
+      segs.push({ x1: x, z1: minZ, x2: x, z2: cz - dw }, { x1: x, z1: cz + dw, x2: x, z2: maxZ });
+    } else segs.push({ x1: x, z1: minZ, x2: x, z2: maxZ });
+  }
+  return segs;
+}
+
 const MAPS = {
-  dungeon: {
-    ground: { halfX: 12, halfZ: 40, color: 0x241f19 }, // long ~24x80 hall
+  // Castle Drakenhall — 13-room floor-plan (3x4 grid + gatehouse), centered doors.
+  castle: {
+    ground: { halfX: 39, halfZ: 47, color: 0x2a2622 },
     ceiling: { y: 8 },
-    spawn: { x: 0, z: 34 },
-    // Interior cross-walls split the hall into 3 connected rooms (central doorway gap x=-3..3).
+    spawn: { x: 0, z: 40 }, // Gatehouse (entrance, south)
     walls: [
-      { x1: -12, z1: -13, x2: -3, z2: -13 }, { x1: 3, z1: -13, x2: 12, z2: -13 },
-      { x1: -12, z1: 13, x2: -3, z2: 13 }, { x1: 3, z1: 13, x2: 12, z2: 13 },
+      // North row
+      ...roomWalls(-37, -45, -13, -27, { e: 1, s: 1 }), // Armory (NW)
+      ...roomWalls(-11, -45, 11, -27, { w: 1, e: 1, s: 1 }), // Throne Room (N)
+      ...roomWalls(13, -45, 37, -27, { w: 1, s: 1 }), // Treasury (NE)
+      // Upper-mid row
+      ...roomWalls(-37, -25, -13, -7, { e: 1, n: 1, s: 1 }), // Barracks (W)
+      ...roomWalls(-11, -25, 11, -7, { w: 1, e: 1, n: 1, s: 1 }), // Great Hall (center)
+      ...roomWalls(13, -25, 37, -7, { w: 1, n: 1, s: 1 }), // Library (E)
+      // Lower-mid row
+      ...roomWalls(-37, -5, -13, 13, { e: 1, n: 1, s: 1 }), // Kitchen (W)
+      ...roomWalls(-11, -5, 11, 13, { w: 1, e: 1, n: 1, s: 1 }), // Chapel (center)
+      ...roomWalls(13, -5, 37, 13, { w: 1, n: 1, s: 1 }), // War Room (E)
+      // South row
+      ...roomWalls(-37, 15, -13, 33, { e: 1, n: 1 }), // Stables (SW)
+      ...roomWalls(-11, 15, 11, 33, { w: 1, e: 1, n: 1, s: 1 }), // Courtyard (center)
+      ...roomWalls(13, 15, 37, 33, { w: 1, n: 1 }), // Guard Hall (SE)
+      // Gatehouse (entrance)
+      ...roomWalls(-11, 35, 11, 45, { n: 1 }),
     ],
     pillars: [],
     props: [
-      { model: "chest", x: 0, z: -36, rot: 0.3, solid: true },
-      { model: "chest", x: 0, z: 0, rot: -0.4, solid: true },
-      { model: "barrel", x: -10, z: -28, solid: true },
-      { model: "crate", x: 10, z: -16, solid: true },
-      { model: "barrel", x: 10, z: 8, solid: true },
-      { model: "crate", x: -10, z: 20, solid: true },
-      { model: "gravestone", x: -9, z: -33, rot: 0.2 },
-      { model: "grave", x: 9, z: -25, rot: 0.1 },
-      { model: "ribcage", x: -9, z: -6, rot: 0.3 },
-      { model: "bone", x: 9, z: 2, rot: 1.0 },
-      { model: "coffin", x: -9, z: 14, rot: 0.6 },
-      { model: "gravemarker", x: 9, z: 26, rot: -0.3 },
-      { model: "bone", x: -9, z: 32, rot: 0.5 },
-      { model: "candle", x: 9, z: -36 },
+      { model: "chest", x: 0, z: -36, rot: 0, solid: true }, // Throne Room
+      { model: "chest", x: 25, z: -36, rot: -0.3, solid: true }, // Treasury
+      { model: "chest", x: 30, z: -32, rot: 0.4, solid: true },
+      { model: "barrel", x: -30, z: -36, solid: true }, // Armory
+      { model: "crate", x: -25, z: -32, solid: true },
+      { model: "barrel", x: -30, z: -16, solid: true }, // Barracks
+      { model: "crate", x: -28, z: 4, solid: true }, // Kitchen
+      { model: "barrel", x: -22, z: 8, solid: true },
+      { model: "crate", x: -30, z: 24, solid: true }, // Stables
+      { model: "candle", x: -4, z: 8 }, // Chapel
+      { model: "candle", x: 4, z: 8 },
+      { model: "gravestone", x: 0, z: 10, rot: 0 },
+      { model: "barrel", x: 28, z: 4, solid: true }, // War Room
+      { model: "ribcage", x: 24, z: 24 }, // Guard Hall
+      { model: "bone", x: 6, z: 30, rot: 0.6 }, // Courtyard
+      { model: "barrel", x: 0, z: 42, solid: true }, // Gatehouse
     ],
     torches: [
-      { x: -11, z: -33, y: 4 }, { x: 11, z: -33, y: 4 },
-      { x: -11, z: -19, y: 4 }, { x: 11, z: -19, y: 4 },
-      { x: -11, z: -5, y: 4 }, { x: 11, z: -5, y: 4 },
-      { x: -11, z: 9, y: 4 }, { x: 11, z: 9, y: 4 },
-      { x: -11, z: 23, y: 4 }, { x: 11, z: 23, y: 4 },
-      { x: -11, z: 36, y: 4 }, { x: 11, z: 36, y: 4 },
+      { x: -25, z: -29, y: 4 }, { x: 0, z: -29, y: 4 }, { x: 25, z: -29, y: 4 },
+      { x: -25, z: -9, y: 4 }, { x: 0, z: -9, y: 4 }, { x: 25, z: -9, y: 4 },
+      { x: -25, z: 11, y: 4 }, { x: 0, z: 11, y: 4 }, { x: 25, z: 11, y: 4 },
+      { x: -25, z: 31, y: 4 }, { x: 0, z: 31, y: 4 }, { x: 25, z: 31, y: 4 },
+      { x: 0, z: 43, y: 4 },
+    ],
+  },
+  dungeon: {
+    ground: { halfX: 30, halfZ: 40, color: 0x241f19 }, // floor-plan footprint
+    ceiling: { y: 8 },
+    spawn: { x: -19, z: 0 }, // Guard Room (entrance, west)
+    walls: [
+      ...roomWalls(-9, -11, 9, 11, { n: 1, s: 1, e: 1, w: 1 }), // Grand Chamber (center)
+      ...roomWalls(-9, -38, 9, -13, { s: 1, w: 1, e: 1 }), // Alchemy Shrine (N)
+      ...roomWalls(-9, 13, 9, 38, { n: 1 }), // Hall of Traps (S)
+      ...roomWalls(11, -11, 28, 11, { w: 1, n: 1, s: 1 }), // Shrine of Dawn (E)
+      ...roomWalls(-28, -11, -11, 11, { e: 1, n: 1, s: 1 }), // Guard Room (W)
+      ...roomWalls(-28, -38, -11, -13, { s: 1, e: 1 }), // Storage (NW)
+      ...roomWalls(11, -38, 28, -13, { s: 1, w: 1 }), // Treasure Vault (NE)
+      ...roomWalls(-28, 13, -11, 38, { n: 1 }), // Prison (SW)
+      ...roomWalls(11, 13, 28, 38, { n: 1 }), // Boss Lair (SE)
+    ],
+    pillars: [],
+    props: [
+      { model: "chest", x: 20, z: -25, rot: 0.3, solid: true }, // Treasure Vault
+      { model: "chest", x: 20, z: 24, rot: -0.3, solid: true }, // Boss Lair
+      { model: "chest", x: 24, z: 30, rot: 0.5, solid: true },
+      { model: "barrel", x: -19, z: 6, solid: true }, // Guard
+      { model: "crate", x: -22, z: -25, solid: true }, // Storage
+      { model: "barrel", x: -16, z: -31, solid: true },
+      { model: "ribcage", x: -20, z: 22 }, // Prison
+      { model: "bone", x: -24, z: 30, rot: 0.8 },
+      { model: "coffin", x: -16, z: 28, rot: 0.4 },
+      { model: "gravestone", x: -4, z: -30, rot: 0.2 }, // Alchemy
+      { model: "candle", x: 5, z: -31 },
+      { model: "barrel", x: 0, z: 30, solid: true }, // Hall of Traps
+      { model: "bone", x: 5, z: 34, rot: 1.0 },
+      { model: "gravemarker", x: 22, z: -18, rot: -0.3 },
+      { model: "ribcage", x: 22, z: 18 },
+    ],
+    torches: [
+      { x: -7, z: -9, y: 4 }, { x: 7, z: 9, y: 4 },
+      { x: -26, z: -9, y: 4 }, { x: -26, z: 9, y: 4 },
+      { x: 26, z: -9, y: 4 }, { x: 26, z: 9, y: 4 },
+      { x: -7, z: -36, y: 4 }, { x: 7, z: -36, y: 4 },
+      { x: -7, z: 36, y: 4 }, { x: 7, z: 36, y: 4 },
+      { x: -26, z: -36, y: 4 }, { x: 26, z: -36, y: 4 },
+      { x: -26, z: 36, y: 4 }, { x: 26, z: 36, y: 4 },
     ],
   },
 };
@@ -775,7 +856,7 @@ function scatterPlagueProps(list) {
 }
 
 function onDungeonAssetsReady() {
-  if (MAP_ID === "castle" || !MAPS[MAP_ID]) dressArena();
+  if (!MAPS[MAP_ID]) dressArena();
   else buildMapDressing(MAPS[MAP_ID]);
 }
 
@@ -1035,7 +1116,7 @@ function updateChar(char, dt, moving) {
 init();
 
 function init() {
-  const customMap = MAP_ID !== "castle" && MAPS[MAP_ID];
+  const customMap = !!MAPS[MAP_ID];
   setupWorld();
   if (!customMap) setupLights();
   setupPostProcessing();
