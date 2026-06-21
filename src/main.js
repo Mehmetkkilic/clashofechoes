@@ -1359,7 +1359,9 @@ function noise(duration, options = {}) {
 function initMultiplayer() {
   const params = new URLSearchParams(window.location.search);
   const explicitServer = params.get("server");
-  multiplayer.room = params.get("room") || "public";
+  const baseRoom = params.get("room") || "public";
+  // Group players by map so the server can place bots within the right bounds.
+  multiplayer.room = MAP_ID === "castle" ? baseRoom : `${baseRoom}:${MAP_ID}`;
   multiplayer.serverUrl = resolveMultiplayerServerUrl(explicitServer);
 
   if (!multiplayer.serverUrl) {
@@ -3426,6 +3428,17 @@ function showLeaderboard() {
 }
 
 function setupMenus() {
+  document.querySelectorAll(".map-button").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.map === MAP_ID);
+    btn.addEventListener("click", () => {
+      if (btn.dataset.map === MAP_ID) return;
+      const params = new URLSearchParams(window.location.search);
+      if (btn.dataset.map === "castle") params.delete("map");
+      else params.set("map", btn.dataset.map);
+      window.location.search = params.toString(); // reload into the chosen map
+    });
+  });
+
   ui.menuPlay?.addEventListener("click", showHeroSelect);
   ui.menuLeaderboard?.addEventListener("click", showLeaderboard);
   ui.lbBack?.addEventListener("click", showMainMenu);
