@@ -52,6 +52,20 @@ const MAP_BOUNDS = {
       { x: 25, z: -16 },  // Library (E)
     ],
   },
+  medieval: {
+    halfX: 32,
+    halfZ: 42,
+    spawns: [
+      { x: 0, z: 2 },     // Great Hall (center)
+      { x: 0, z: -34 },   // Throne Room (N)
+      { x: -22, z: -34 }, // NW Tower
+      { x: 22, z: -34 },  // NE Tower
+      { x: -22, z: 2 },   // Barracks (W)
+      { x: 22, z: 2 },    // Tavern (E)
+      { x: -22, z: 20 },  // Stables (W)
+      { x: 22, z: 20 },   // Granary (E)
+    ],
+  },
   dungeon: {
     halfX: 29,
     halfZ: 38,
