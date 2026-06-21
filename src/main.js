@@ -497,6 +497,13 @@ const DUNGEON_MODELS = {
   candle: "/models/dungeon/candle_lit.gltf.glb",
   floor: "/models/dungeon/floor_dirt_large.gltf.glb",
   wall: "/models/dungeon/wall.gltf.glb",
+  gravestone: "/models/halloween/gravestone.gltf",
+  grave: "/models/halloween/grave_A.gltf",
+  gravemarker: "/models/halloween/gravemarker_A.gltf",
+  bone: "/models/halloween/bone_A.gltf",
+  ribcage: "/models/halloween/ribcage.gltf",
+  coffin: "/models/halloween/coffin.gltf",
+  fence: "/models/halloween/fence.gltf",
 };
 const dungeonCache = new Map();
 const arenaProps = [];
@@ -514,7 +521,19 @@ let arenaDressed = false;
  *   torches: [ { x, z, y? } ]          -> point light + KayKit torch
  * -------------------------------------------------------------------------
  */
-const PROP_HEIGHTS = { chest: 1.3, barrel: 1.6, crate: 1.9, candle: 0.7 };
+const PROP_HEIGHTS = {
+  chest: 1.3,
+  barrel: 1.6,
+  crate: 1.9,
+  candle: 0.7,
+  gravestone: 1.4,
+  grave: 0.6,
+  gravemarker: 1.1,
+  bone: 0.3,
+  ribcage: 0.8,
+  coffin: 0.9,
+  fence: 1.2,
+};
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
 let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 
@@ -731,6 +750,20 @@ function dressArena() {
   // A couple of candles on ruin blocks.
   placeProp("candle", { x: -14, y: 7.8, z: -12, targetH: 0.7 });
   placeProp("candle", { x: 13, y: 7.2, z: 10, targetH: 0.7 });
+
+  scatterPlagueProps([
+    ["gravestone", -11, -9, 0.3], ["grave", -14, -9, 0.1], ["gravestone", 12, 10, -0.4],
+    ["gravemarker", 10, -12, 0.6], ["ribcage", -9, 13, 0.2], ["bone", 8, 14, 1.1],
+    ["coffin", -16, 11, 0.8], ["bone", 15, -7, 0.4], ["gravestone", -17, 4, 0.2],
+    ["gravemarker", 16, 2, -0.3], ["ribcage", 6, -15, 0.5],
+  ]);
+}
+
+// Place a list of [model, x, z, rotY] decorative props (graveyard / plague clutter).
+function scatterPlagueProps(list) {
+  for (const [model, x, z, rot] of list) {
+    placeProp(model, { x, z, rotY: rot ?? 0, targetH: PROP_HEIGHTS[model] ?? 1 });
+  }
 }
 
 function onDungeonAssetsReady() {
@@ -845,6 +878,10 @@ function buildMapDressing(def) {
       targetH: PROP_HEIGHTS[pr.model] ?? 1.3,
     });
   }
+  scatterPlagueProps([
+    ["gravestone", -14, -8, 0.3], ["ribcage", 13, 9, 0.2], ["bone", -10, 13, 1.0],
+    ["coffin", 14, -13, 0.7], ["gravemarker", 8, 4, -0.4], ["bone", -15, -14, 0.5],
+  ]);
   for (const torch of torches) {
     const p = torch.light.position;
     const model = placeProp("torch", { x: p.x, y: Math.max(1.25, p.y - 0.55) - 0.2, z: p.z, targetH: 1.5 });
