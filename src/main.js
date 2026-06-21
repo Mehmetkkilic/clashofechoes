@@ -474,7 +474,7 @@ const ATTACK_CLIP = {
 };
 const MODEL_TARGET_HEIGHT = 1.85;
 const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
-const CHARACTER_FOOT_LIFT = 0.08; // lift feet onto the floor tiles (avoid sinking)
+const CHARACTER_FOOT_LIFT = 0.05; // small lift onto the floor tiles (origin = feet)
 const TPS_DISTANCE = 4.5;
 const TPS_FOCUS_Y = 0.4;
 const TPS_SHOULDER = 0.7;
@@ -521,7 +521,7 @@ let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 const MAPS = {
   dungeon: {
     ground: { halfX: 22, halfZ: 22, color: 0x241f19 },
-    ceiling: { y: 8.5, color: 0x17130f },
+    ceiling: { y: 8 },
     spawn: { x: 0, z: 14 },
     walls: [],
     pillars: [
@@ -738,7 +738,7 @@ function onDungeonAssetsReady() {
   else buildMapDressing(MAPS[MAP_ID]);
 }
 
-function tileFloorArea(halfX, halfZ) {
+function tileFloorArea(halfX, halfZ, topY = 0.05, faceDown = false) {
   const baked = extractBakedTile("floor");
   if (!baked) return;
   const step = baked.size.x || 4;
@@ -748,8 +748,13 @@ function tileFloorArea(halfX, halfZ) {
   }
   const inst = new THREE.InstancedMesh(baked.geometry, baked.material, cells.length);
   const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3(1, 1, 1);
+  const p = new THREE.Vector3();
+  if (faceDown) q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI); // ceiling: flip to face down
   cells.forEach(([x, z], i) => {
-    m.makeTranslation(x, 0.05 - baked.size.y, z);
+    p.set(x, faceDown ? topY : topY - baked.size.y, z);
+    m.compose(p, q, s);
     inst.setMatrixAt(i, m);
   });
   inst.instanceMatrix.needsUpdate = true;
@@ -807,16 +812,6 @@ function buildMapCollision(def) {
   scene.add(base);
   addWalkRect(0, 0, (g.halfX + 6) * 2, (g.halfZ + 6) * 2, 0);
 
-  if (def.ceiling) {
-    const ceiling = new THREE.Mesh(
-      new THREE.PlaneGeometry(g.halfX * 2 + 4, g.halfZ * 2 + 4),
-      new THREE.MeshLambertMaterial({ color: def.ceiling.color ?? 0x17130f, side: THREE.DoubleSide })
-    );
-    ceiling.rotation.x = Math.PI / 2; // face down
-    ceiling.position.y = def.ceiling.y ?? 8.5;
-    scene.add(ceiling);
-  }
-
   const th = 1.5;
   const wallH = 8;
   addBoxCollider(0, -g.halfZ, g.halfX * 2, th, 0, wallH);
@@ -839,6 +834,7 @@ function buildMapDressing(def) {
   const g = def.ground;
   tileFloorArea(g.halfX, g.halfZ);
   tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2);
+  if (def.ceiling) tileFloorArea(g.halfX, g.halfZ, def.ceiling.y ?? 8, true); // stone roof
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
     placeProp(pr.model, {
@@ -881,9 +877,9 @@ function makeCharInstance(key) {
   const size = box.getSize(new THREE.Vector3());
   const scale = size.y > 0.001 ? MODEL_TARGET_HEIGHT / size.y : 1;
   root.scale.setScalar(scale);
-  root.updateMatrixWorld(true);
-  const grounded = new THREE.Box3().setFromObject(root);
-  root.position.y = -grounded.min.y + CHARACTER_FOOT_LIFT;
+  // KayKit's armature root sits at the feet, so trust the origin. Box3.setFromObject is
+  // unreliable for skinned meshes (bind-pose bounds), which caused the sinking.
+  root.position.y = CHARACTER_FOOT_LIFT;
   root.rotation.y = MODEL_FACING_YAW;
   root.traverse((o) => {
     if (o.isMesh) {
@@ -3413,9 +3409,7 @@ function setPreviewClass(classId) {
   const size = box.getSize(new THREE.Vector3());
   const scale = size.y > 0.001 ? 1.9 / size.y : 1;
   root.scale.setScalar(scale);
-  root.updateMatrixWorld(true);
-  const grounded = new THREE.Box3().setFromObject(root);
-  root.position.y = -grounded.min.y;
+  root.position.y = 0; // KayKit origin is at the feet
   root.traverse((o) => {
     if (o.isMesh) o.frustumCulled = false;
   });
