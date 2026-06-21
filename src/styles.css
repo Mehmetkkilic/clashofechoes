@@ -1176,6 +1176,28 @@ body.touch.playing .mobile-actions {
   outline: 0;
 }
 
+.menu-maps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+}
+
+.map-button {
+  min-height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.map-button.active {
+  border-color: rgba(225, 181, 96, 0.85);
+  background: rgba(225, 181, 96, 0.18);
+}
+
 .leaderboard-list {
   display: grid;
   gap: 8px;

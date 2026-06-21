@@ -36,6 +36,26 @@ const botSpawnPoints = [
   { x: 20, z: 18 },
 ];
 
+// Per-map bot bounds + spawn points. The map id is the room name suffix after ":".
+const MAP_BOUNDS = {
+  castle: { halfX: 47, halfZ: 47, spawns: botSpawnPoints },
+  dungeon: {
+    halfX: 20,
+    halfZ: 20,
+    spawns: [
+      { x: -13, z: -13 },
+      { x: 13, z: -13 },
+      { x: -13, z: 13 },
+      { x: 13, z: 13 },
+    ],
+  },
+};
+
+function mapForRoom(name) {
+  const id = String(name).split(":")[1] || "castle";
+  return MAP_BOUNDS[id] ? id : "castle";
+}
+
 const mimeTypes = {
   ".css": "text/css; charset=utf-8",
   ".gif": "image/gif",
@@ -341,8 +361,13 @@ wss.on("connection", (ws, request) => {
 function getRoom(name) {
   let room = rooms.get(name);
   if (!room) {
+    const mapId = mapForRoom(name);
+    const bounds = MAP_BOUNDS[mapId];
     room = {
       name,
+      mapId,
+      bounds,
+      spawns: bounds.spawns,
       bots: new Map(),
       scores: new Map(),
       match: {
@@ -367,11 +392,14 @@ function ensureRoomBots(room) {
     room.nextBotSlot += 1;
     const classId = botClasses[slot % botClasses.length];
     const stats = classStats[classId] || classStats.fighter;
-    const spawn = botSpawnPoints[slot % botSpawnPoints.length];
+    const spawns = room.spawns || botSpawnPoints;
+    const spawn = spawns[slot % spawns.length];
     const bot = {
       id: `bot:${room.botSeed}:${slot}`,
       slot,
       classId,
+      bounds: room.bounds,
+      spawns,
       hp: stats.hp,
       maxHp: stats.hp,
       score: 0,
@@ -561,7 +589,8 @@ function applyBotKnockback(bot, attackerId, knock) {
 }
 
 function respawnBot(bot) {
-  const spawn = botSpawnPoints[bot.slot % botSpawnPoints.length];
+  const spawns = bot.spawns || botSpawnPoints;
+  const spawn = spawns[bot.slot % spawns.length];
   const stats = classStats[bot.classId] || classStats.fighter;
   bot.position.x = spawn.x + (Math.random() - 0.5) * 5;
   bot.position.y = 1.72;
@@ -808,8 +837,10 @@ function randomFlatDirection() {
 }
 
 function clampBotPosition(bot) {
-  bot.position.x = Math.min(47, Math.max(-47, bot.position.x));
-  bot.position.z = Math.min(47, Math.max(-47, bot.position.z));
+  const bx = bot.bounds?.halfX ?? 47;
+  const bz = bot.bounds?.halfZ ?? 47;
+  bot.position.x = Math.min(bx, Math.max(-bx, bot.position.x));
+  bot.position.z = Math.min(bz, Math.max(-bz, bot.position.z));
 }
 
 function sanitizeState(state) {
