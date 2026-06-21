@@ -40,13 +40,15 @@ const botSpawnPoints = [
 const MAP_BOUNDS = {
   castle: { halfX: 47, halfZ: 47, spawns: botSpawnPoints },
   dungeon: {
-    halfX: 20,
-    halfZ: 20,
+    halfX: 11,
+    halfZ: 38,
     spawns: [
-      { x: -13, z: -13 },
-      { x: 13, z: -13 },
-      { x: -13, z: 13 },
-      { x: 13, z: 13 },
+      { x: -7, z: -30 },
+      { x: 7, z: -30 },
+      { x: -7, z: 0 },
+      { x: 7, z: 0 },
+      { x: 0, z: 28 },
+      { x: 0, z: -10 },
     ],
   },
 };
