@@ -401,6 +401,11 @@ const lightingState = {
 let yaw = 0;
 let pitch = -0.04;
 let lastHitFlash = 0;
+let camShake = 0;
+
+function addCameraShake(mag) {
+  camShake = Math.min(0.7, Math.max(camShake, mag));
+}
 let composer = null;
 let previewRenderer = null;
 let previewScene = null;
@@ -2123,6 +2128,7 @@ function applyPeerDamage(attackerId, hit = {}) {
   player.invulnerable = 0.18;
   ui.vignette.classList.add("active");
   lastHitFlash = 0.14;
+  addCameraShake(0.3);
 
   if (attacker) {
     const impact = player.position.clone().add(new THREE.Vector3(0, -0.45, 0));
@@ -3026,6 +3032,11 @@ function updateRemotePlayers(dt) {
       remote.weapon.rotation.z *= Math.pow(0.02, dt);
       remote.weapon.position.x *= Math.pow(0.02, dt);
     }
+    if (remote.hitPunch > 0) {
+      remote.hitPunch = Math.max(0, remote.hitPunch - dt);
+      const base = remote.isBoss ? remote.state?.scale || 2.2 : 1;
+      remote.group.scale.setScalar(base * (1 + 0.2 * (remote.hitPunch / 0.12)));
+    }
     remote.healthFill.parent.quaternion.copy(camera.quaternion);
     remote.nameSprite.quaternion.copy(camera.quaternion);
   }
@@ -3743,6 +3754,7 @@ function update(dt) {
   updatePotions(dt);
 
   if (player.invulnerable > 0) player.invulnerable -= dt;
+  if (camShake > 0) camShake = Math.max(0, camShake - dt * 2.6);
   if (lastHitFlash > 0) {
     lastHitFlash -= dt;
     if (lastHitFlash <= 0) ui.vignette.classList.remove("active");
@@ -3943,6 +3955,11 @@ function updateCamera() {
   const focus = player.position.clone();
   focus.y += ISO_FOCUS_Y;
   camera.position.copy(focus).add(ISO_OFFSET);
+  if (camShake > 0.0005) {
+    camera.position.x += (Math.random() - 0.5) * camShake;
+    camera.position.y += (Math.random() - 0.5) * camShake;
+    camera.position.z += (Math.random() - 0.5) * camShake;
+  }
   camera.lookAt(focus);
   camera.updateMatrixWorld();
 }
@@ -4102,6 +4119,10 @@ function updateEnemies(dt) {
       continue;
     }
 
+    if (enemy.hitPunch > 0) {
+      enemy.hitPunch = Math.max(0, enemy.hitPunch - dt);
+      enemy.group.scale.setScalar(1 + 0.2 * (enemy.hitPunch / 0.12));
+    }
     enemy.frozen = Math.max(0, enemy.frozen - dt);
     enemy.silenced = Math.max(0, enemy.silenced - dt);
     enemy.fear = Math.max(0, enemy.fear - dt);
@@ -4739,10 +4760,10 @@ function hitEnemy(enemy, amount, label, color, extra = {}) {
   }
 
   spawnHitBurst(enemy.group.position.clone().add(new THREE.Vector3(0, 1.3, 0)), color);
+  enemy.hitPunch = 0.12;
   if (!extra.quiet) {
+    addCameraShake(0.1);
     playSound("hit", clamp(amount / 60, 0.45, 1.25));
-  }
-  if (!extra.quiet) {
     spawnFloatingText(enemy.group.position.clone().add(new THREE.Vector3(0, 2.8, 0)), Math.round(amount), color);
   }
 
@@ -4762,7 +4783,9 @@ function hitRemotePlayer(remote, amount, label, color, extra = {}) {
 
   if (mods.lifesteal > 0) healPlayer(amount * mods.lifesteal);
   spawnHitBurst(remote.group.position.clone().add(new THREE.Vector3(0, 1.3, 0)), color);
+  remote.hitPunch = 0.12;
   if (!extra.quiet) {
+    addCameraShake(0.1);
     playSound("hit", clamp(amount / 60, 0.45, 1.25));
     spawnFloatingText(remote.group.position.clone().add(new THREE.Vector3(0, 2.8, 0)), Math.round(amount), color);
     if (Math.random() > 0.48) addFeed(`${label} hit player`, "Hit");
@@ -4813,6 +4836,7 @@ function damagePlayer(amount, enemy) {
   player.invulnerable = 0.25;
   ui.vignette.classList.add("active");
   lastHitFlash = 0.14;
+  addCameraShake(0.3);
 
   if (player.hp <= 0) {
     player.deaths += 1;
@@ -5127,6 +5151,48 @@ function spawnHitBurst(position, color) {
       effect.mesh.material.opacity = Math.max(0, 0.9 * (1 - progress));
     },
   });
+
+  // White impact flash core.
+  const flash = new THREE.Mesh(
+    new THREE.SphereGeometry(0.3, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false })
+  );
+  flash.position.copy(position);
+  scene.add(flash);
+  effects.push({
+    mesh: flash,
+    life: 0.14,
+    maxLife: 0.14,
+    update(effect, progress) {
+      effect.mesh.scale.setScalar(1 + progress * 1.8);
+      effect.mesh.material.opacity = Math.max(0, 0.85 * (1 - progress));
+    },
+  });
+
+  // A few spark shards flying outward.
+  for (let i = 0; i < 5; i++) {
+    const shard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.07, 0.07, 0.28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+    );
+    shard.position.copy(position);
+    const vel = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.7, Math.random() - 0.5)
+      .normalize()
+      .multiplyScalar(5 + Math.random() * 3);
+    shard.lookAt(position.clone().add(vel));
+    scene.add(shard);
+    effects.push({
+      mesh: shard,
+      life: 0.26,
+      maxLife: 0.26,
+      vel,
+      update(effect, progress, dt) {
+        effect.mesh.position.addScaledVector(effect.vel, dt);
+        effect.vel.multiplyScalar(0.9);
+        effect.mesh.material.opacity = Math.max(0, 0.95 * (1 - progress));
+      },
+    });
+  }
 }
 
 // PvE loot: a killed skeleton drops a glowing orb — the class resource, or sometimes health.
@@ -5427,12 +5493,19 @@ function updateHud() {
   }
 }
 
+// Target a constant HORIZONTAL field of view so the character reads the same size in
+// portrait and landscape (otherwise a fixed vertical FOV zooms in on tall screens).
+const BASE_HFOV = 78;
+
 function resize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
   renderer.setSize(width, height, false);
   if (composer) composer.setSize(width, height);
   camera.aspect = width / height;
+  const hfov = THREE.MathUtils.degToRad(BASE_HFOV);
+  const vfov = 2 * Math.atan(Math.tan(hfov / 2) / camera.aspect);
+  camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(vfov), 50, 100);
   camera.updateProjectionMatrix();
   resizePreview();
 }
