@@ -39,6 +39,9 @@ const ui = {
   nickInput: document.querySelector("#nick-input"),
   hpBar: document.querySelector("#hp-bar"),
   hpText: document.querySelector("#hp-text"),
+  manaHud: document.querySelector("#mana-hud"),
+  manaBar: document.querySelector("#mana-bar"),
+  manaText: document.querySelector("#mana-text"),
   className: document.querySelector("#class-name"),
   score: document.querySelector("#score"),
   deaths: document.querySelector("#deaths"),
@@ -72,12 +75,6 @@ const ui = {
     e: document.querySelector("#e-cd"),
     r: document.querySelector("#r-cd"),
   },
-  upgradeModal: document.querySelector("#upgrade-modal"),
-  upgradeCards: Array.from(document.querySelectorAll(".upgrade-card")).map((root) => ({
-    root,
-    name: root.querySelector(".upgrade-name"),
-    desc: root.querySelector(".upgrade-desc"),
-  })),
   mobileAbilityButtons: Array.from(
     document.querySelectorAll("#mobile-actions .mobile-btn[data-slot]")
   ).map((root) => ({
@@ -228,6 +225,47 @@ const AUDIO_SAMPLES = {
   ultimate: { src: "/audio/darkmagic.m4a", gain: 0.42, maxDuration: 2.7 },
 };
 
+// ---- Mana economy (PvE only): spells/arrows cost mana; kills drop potions. ----
+const MAX_MANA = 100;
+const MANA_REGEN = 6; // per second, passive
+const POTION_MANA = 40;
+const POTION_HEAL = 40;
+// Per class+slot mana cost. Fighter (melee) costs nothing; casters/ranger pay.
+const MANA_COST = {
+  priest: { primary: 16, secondary: 22, q: 26, e: 24, r: 55 },
+  witch: { primary: 16, secondary: 20, q: 26, e: 24, r: 55 },
+  ranger: { primary: 12, secondary: 20, q: 0, e: 18, r: 45 },
+  fighter: {},
+};
+
+// True only when mana is active and this cast would actually cost mana.
+function manaCostFor(slot) {
+  if (!MANA_ENABLED) return 0;
+  return MANA_COST[player.classId]?.[slot] ?? 0;
+}
+
+// Show the mana bar only in PvE for classes that actually spend mana.
+function classUsesMana(classId) {
+  return Object.values(MANA_COST[classId] || {}).some((c) => c > 0);
+}
+function updateManaHudVisibility() {
+  if (!ui.manaHud) return;
+  const show = MANA_ENABLED && classUsesMana(player.classId);
+  ui.manaHud.classList.toggle("hidden", !show);
+}
+
+// Check + spend mana for a cast; returns false (and warns) if too low.
+function spendMana(slot) {
+  const cost = manaCostFor(slot);
+  if (cost <= 0) return true;
+  if (player.mana < cost) {
+    addFeed("Mana yetersiz", "Mana");
+    return false;
+  }
+  player.mana -= cost;
+  return true;
+}
+
 const player = {
   name: "Player",
   classId: "fighter",
@@ -235,6 +273,8 @@ const player = {
   velocity: new THREE.Vector3(),
   hp: CLASS_DATA.fighter.hp,
   maxHp: CLASS_DATA.fighter.hp,
+  mana: MAX_MANA,
+  maxMana: MAX_MANA,
   score: 0,
   deaths: 0,
   shield: false,
@@ -247,7 +287,7 @@ const player = {
   invulnerable: 0,
 };
 
-// Roguelite upgrade modifiers. Stack during a match, reset on new round.
+// Combat modifiers (kept neutral now that per-kill upgrades are gone; still read by hit/move math).
 const mods = {
   damageMult: 1,
   lifesteal: 0,
@@ -256,66 +296,13 @@ const mods = {
   maxHpBonus: 0,
 };
 
-const upgradeState = {
-  open: false,
-  queued: 0,
-  options: [],
-  autoPickAt: 0,
-};
-
-let lastScore = 0;
-
-const UPGRADE_POOL = [
-  {
-    id: "lifesteal",
-    name: "Vampirizm",
-    desc: "Verdiğin hasarın %15'i kadar can çal",
-    apply() {
-      mods.lifesteal += 0.15;
-    },
-  },
-  {
-    id: "damage",
-    name: "Keskinlik",
-    desc: "Hasar +%20",
-    apply() {
-      mods.damageMult += 0.2;
-    },
-  },
-  {
-    id: "speed",
-    name: "Çeviklik",
-    desc: "Hareket hızı +%12",
-    apply() {
-      mods.speedMult += 0.12;
-    },
-  },
-  {
-    id: "cdr",
-    name: "Soğukkanlılık",
-    desc: "Yetenek bekleme süreleri %18 daha hızlı",
-    apply() {
-      mods.cdrBonus += 0.18;
-    },
-  },
-  {
-    id: "maxhp",
-    name: "Dayanıklılık",
-    desc: "Maksimum can +25 (ve hemen iyileş)",
-    apply() {
-      mods.maxHpBonus += 25;
-      player.maxHp = classBaseHp() + mods.maxHpBonus;
-      player.hp = Math.min(player.maxHp, player.hp + 25);
-    },
-  },
-];
-
 const enemies = [];
 const projectiles = [];
 const effects = [];
 const timedZones = [];
 const blockers = [];
 const floatingMessages = [];
+const potions = [];
 const torches = [];
 const remotePlayers = new Map();
 const worldColliders = [];
@@ -556,6 +543,7 @@ const PROP_HEIGHTS = {
 };
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
 const MODE = (new URLSearchParams(window.location.search).get("mode") || "pve").toLowerCase() === "pvp" ? "pvp" : "pve";
+const MANA_ENABLED = MODE === "pve"; // mana/potions are a PvE-only resource loop
 let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 
 // Emit the 4 wall segments of a room; sides with a door get a centered gap.
@@ -2200,7 +2188,6 @@ function handleMatchReset() {
   matchState.resetAt = 0;
   player.score = 0;
   player.deaths = 0;
-  lastScore = 0;
   resetMods();
   respawnPlayer();
   showMatchBanner("New Round", `First to ${matchState.limit} kills`);
@@ -2226,71 +2213,7 @@ function resetMods() {
   mods.maxHpBonus = 0;
   player.maxHp = classBaseHp();
   player.hp = Math.min(player.hp, player.maxHp);
-  upgradeState.queued = 0;
-  closeUpgradeModal();
-}
-
-function updateUpgrades() {
-  const delta = player.score - lastScore;
-  if (delta > 0) {
-    // A small jump is a fresh kill; a large jump is a join/score resync.
-    if (delta <= 2) upgradeState.queued += delta;
-    lastScore = player.score;
-  } else if (delta < 0) {
-    lastScore = player.score;
-  }
-
-  if (!upgradeState.open && upgradeState.queued > 0 && controlsLocked) {
-    upgradeState.queued -= 1;
-    offerUpgrades();
-  }
-
-  if (upgradeState.open && performance.now() >= upgradeState.autoPickAt) {
-    selectUpgrade(0);
-  }
-}
-
-function offerUpgrades() {
-  if (upgradeState.open || !ui.upgradeModal) return;
-  const pool = UPGRADE_POOL.slice();
-  const options = [];
-  while (options.length < 3 && pool.length) {
-    const idx = Math.floor(Math.random() * pool.length);
-    options.push(pool.splice(idx, 1)[0]);
-  }
-  upgradeState.options = options;
-  upgradeState.open = true;
-  upgradeState.autoPickAt = performance.now() + 6000;
-  renderUpgradeModal();
-  ui.upgradeModal.classList.remove("hidden");
-  playSound("class");
-}
-
-function renderUpgradeModal() {
-  ui.upgradeCards.forEach((card, i) => {
-    const opt = upgradeState.options[i];
-    card.root.style.display = opt ? "" : "none";
-    if (opt) {
-      card.name.textContent = opt.name;
-      card.desc.textContent = opt.desc;
-    }
-  });
-}
-
-function selectUpgrade(index) {
-  if (!upgradeState.open) return;
-  const choice = upgradeState.options[index];
-  if (!choice) return;
-  choice.apply();
-  addFeed(`Yükseltme: ${choice.name}`, "Roguelite");
-  playSound("class");
-  closeUpgradeModal();
-}
-
-function closeUpgradeModal() {
-  upgradeState.open = false;
-  upgradeState.options = [];
-  if (ui.upgradeModal) ui.upgradeModal.classList.add("hidden");
+  player.mana = player.maxMana;
 }
 
 function clearRemotePlayers() {
@@ -3247,24 +3170,6 @@ function bindEvents() {
 
     if (document.activeElement === ui.nickInput) return;
 
-    if (upgradeState.open) {
-      if (event.code === "Digit1") {
-        event.preventDefault();
-        selectUpgrade(0);
-        return;
-      }
-      if (event.code === "Digit2") {
-        event.preventDefault();
-        selectUpgrade(1);
-        return;
-      }
-      if (event.code === "Digit3") {
-        event.preventDefault();
-        selectUpgrade(2);
-        return;
-      }
-    }
-
     switch (event.code) {
       case "KeyW":
         input.forward = true;
@@ -3348,12 +3253,6 @@ function bindEvents() {
     button.addEventListener("click", () => {
       selectClass(button.dataset.class);
       canvas.focus();
-    });
-  });
-
-  ui.upgradeCards.forEach((card) => {
-    card.root.addEventListener("click", () => {
-      selectUpgrade(Number(card.root.dataset.index));
     });
   });
 }
@@ -3515,10 +3414,6 @@ function setupMobileControls() {
 }
 
 function handleMobileAction(action, pressed, btn) {
-  if (upgradeState.open && pressed) {
-    // Let upgrade taps fall through to the modal cards instead.
-    return;
-  }
   switch (action) {
     case "primary":
       if (pressed) usePrimary();
@@ -3552,6 +3447,8 @@ function selectClass(classId) {
   const data = CLASS_DATA[classId];
   player.maxHp = data.hp + mods.maxHpBonus;
   player.hp = player.maxHp;
+  player.mana = player.maxMana;
+  updateManaHudVisibility();
   player.shield = false;
   player.chargingShot = false;
   player.chargeRush = 0;
@@ -3752,7 +3649,10 @@ function update(dt) {
     cooldowns[key] = Math.max(0, cooldowns[key] - dt * cdRate);
   }
 
-  updateUpgrades();
+  if (MANA_ENABLED && player.mana < player.maxMana) {
+    player.mana = Math.min(player.maxMana, player.mana + MANA_REGEN * dt);
+  }
+  updatePotions(dt);
 
   if (player.invulnerable > 0) player.invulnerable -= dt;
   if (lastHitFlash > 0) {
@@ -4228,6 +4128,7 @@ function updateFloatingMessages(dt) {
 
 function usePrimary() {
   if (player.deadTimer > 0 || cooldowns.primary > 0 || matchState.status === "ended") return;
+  if (!spendMana("primary")) return;
   const classId = player.classId;
 
   if (classId === "fighter") {
@@ -4299,6 +4200,7 @@ function useSecondaryDown() {
 
   if (player.classId === "ranger") {
     if (cooldowns.secondary > 0 || player.chargingShot) return;
+    if (!spendMana("secondary")) return;
     player.chargingShot = true;
     player.chargeStartedAt = performance.now();
     playSound("charge-arrow");
@@ -4307,6 +4209,7 @@ function useSecondaryDown() {
   }
 
   if (cooldowns.secondary > 0) return;
+  if (!spendMana("secondary")) return;
 
   if (player.classId === "priest") {
     cooldowns.secondary = 1.0;
@@ -4367,6 +4270,7 @@ function useSecondaryUp() {
 
 function useAbility(slot) {
   if (player.deadTimer > 0 || cooldowns[slot] > 0 || matchState.status === "ended") return;
+  if (!spendMana(slot)) return;
   const classId = player.classId;
 
   if (classId === "fighter") useFighterAbility(slot);
@@ -4742,6 +4646,7 @@ function killEnemy(enemy, label) {
   player.score += 1;
   playSound("kill");
   addFeed(`Echo ${enemy.id + 1} down`, label);
+  if (MANA_ENABLED) spawnPotion(enemy.group.position);
 }
 
 function respawnEnemy(enemy) {
@@ -5090,6 +4995,52 @@ function spawnHitBurst(position, color) {
   });
 }
 
+// PvE loot: a killed skeleton drops a glowing potion orb (mana, or sometimes health).
+function spawnPotion(position) {
+  const isHeal = Math.random() < 0.3;
+  const color = isHeal ? 0x6bd391 : 0x5aa0ff;
+  const orb = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.34, 0),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+  );
+  orb.position.set(position.x, 0.7, position.z);
+  const glow = new THREE.Mesh(
+    new THREE.SphereGeometry(0.62, 10, 8),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false })
+  );
+  orb.add(glow);
+  scene.add(orb);
+  potions.push({ mesh: orb, kind: isHeal ? "heal" : "mana", life: 12, baseY: 0.7 });
+}
+
+function updatePotions(dt) {
+  for (let i = potions.length - 1; i >= 0; i--) {
+    const p = potions[i];
+    p.life -= dt;
+    p.mesh.rotation.y += dt * 2.2;
+    p.mesh.position.y = p.baseY + Math.sin(performance.now() * 0.004 + i) * 0.12;
+    if (p.life < 2) p.mesh.material.opacity = Math.max(0.1, 0.95 * (p.life / 2)); // fade out
+
+    const dx = p.mesh.position.x - player.position.x;
+    const dz = p.mesh.position.z - player.position.z;
+    const picked = dx * dx + dz * dz < 1.8 * 1.8 && player.deadTimer <= 0;
+    if (picked) {
+      if (p.kind === "heal") {
+        healPlayer(POTION_HEAL);
+        addFeed(`+${POTION_HEAL} Can`, "İksir");
+      } else {
+        player.mana = Math.min(player.maxMana, player.mana + POTION_MANA);
+        addFeed(`+${POTION_MANA} Mana`, "İksir");
+      }
+      playSound("class");
+    }
+    if (picked || p.life <= 0) {
+      scene.remove(p.mesh);
+      potions.splice(i, 1);
+    }
+  }
+}
+
 function spawnFloatingText(position, text, color) {
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({
@@ -5203,6 +5154,11 @@ function updateHud() {
   const hpPercent = player.maxHp > 0 ? player.hp / player.maxHp : 0;
   ui.hpBar.style.transform = `scaleX(${clamp(hpPercent, 0, 1)})`;
   ui.hpText.textContent = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+  if (ui.manaBar) {
+    const manaPercent = player.maxMana > 0 ? player.mana / player.maxMana : 0;
+    ui.manaBar.style.transform = `scaleX(${clamp(manaPercent, 0, 1)})`;
+    ui.manaText.textContent = `${Math.ceil(player.mana)} / ${player.maxMana}`;
+  }
   ui.score.textContent = String(player.score);
   ui.deaths.textContent = String(player.deaths);
 

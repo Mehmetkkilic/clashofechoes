@@ -89,6 +89,15 @@
         <div class="health-track">
           <div id="hp-bar" class="health-fill"></div>
         </div>
+        <div id="mana-hud" class="mana-block hidden">
+          <div class="health-row">
+            <span class="mana-label">Mana</span>
+            <span id="mana-text">100 / 100</span>
+          </div>
+          <div class="health-track mana-track">
+            <div id="mana-bar" class="health-fill mana-fill"></div>
+          </div>
+        </div>
       </section>
 
       <section class="hud ability-hud" aria-label="Abilities">
@@ -158,28 +167,6 @@
           </button>
         </div>
       </div>
-
-      <section id="upgrade-modal" class="upgrade-modal hidden" aria-label="Choose upgrade">
-        <strong class="upgrade-title">Güçlen — bir yükseltme seç</strong>
-        <div class="upgrade-cards">
-          <button class="upgrade-card" type="button" data-index="0">
-            <kbd>1</kbd>
-            <span class="upgrade-name"></span>
-            <small class="upgrade-desc"></small>
-          </button>
-          <button class="upgrade-card" type="button" data-index="1">
-            <kbd>2</kbd>
-            <span class="upgrade-name"></span>
-            <small class="upgrade-desc"></small>
-          </button>
-          <button class="upgrade-card" type="button" data-index="2">
-            <kbd>3</kbd>
-            <span class="upgrade-name"></span>
-            <small class="upgrade-desc"></small>
-          </button>
-        </div>
-        <span class="upgrade-hint">1 · 2 · 3 ile seç</span>
-      </section>
 
       <section id="loading-screen" class="menu-screen loading-screen" aria-label="Loading">
         <strong class="menu-title">Vermincull</strong>

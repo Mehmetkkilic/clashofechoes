@@ -310,6 +310,31 @@ h1 {
   transition: transform 0.16s ease;
 }
 
+.mana-block {
+  margin-top: 7px;
+}
+
+.mana-block.hidden {
+  display: none;
+}
+
+.mana-block .health-row {
+  margin-bottom: 5px;
+}
+
+.mana-label {
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.mana-track {
+  height: 9px;
+}
+
+.mana-fill {
+  background: linear-gradient(90deg, #4a8fff, #8fd0ff);
+}
+
 .ability-hud {
   left: 50%;
   bottom: 18px;
@@ -936,6 +961,14 @@ body.touch.playing .top-hud {
 
 .touch .health-track {
   height: 8px;
+}
+
+.touch .mana-block {
+  margin-top: 4px;
+}
+
+.touch .mana-track {
+  height: 6px;
 }
 
 /* Class panel: shown only on the join screen, or via the toggle while playing. */
