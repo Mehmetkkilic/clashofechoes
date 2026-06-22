@@ -18,6 +18,8 @@ const heartbeatIntervalMs = 15000;
 const botTickMs = 50;
 const botBroadcastMs = 100;
 const botsPerRoom = 2;
+const botAggroRange = 14; // bots patrol until a player comes within this range
+const botAggroMemoryMs = 3000; // keep chasing this long after the target leaves range
 const matchKillLimit = 20;
 const matchResetDelayMs = 5500;
 
@@ -461,6 +463,8 @@ function ensureRoomBots(room) {
       attackCd: 0.45 + Math.random() * 0.7,
       lastBroadcastAt: 0,
       yaw: 0,
+      aggroUntil: 0,
+      home: { x: spawn.x, z: spawn.z },
       position: {
         x: spawn.x,
         y: 1.72,
@@ -518,8 +522,13 @@ function updateBot(room, bot, targets, now, dt) {
 
   bot.attackCd = Math.max(0, bot.attackCd - dt);
   const target = nearestTarget(bot, targets);
+  const distance = target ? horizontalDistance(bot.position, target.state.position) : Infinity;
+  // Aggro only when a player comes within range; remember them briefly so the bot
+  // keeps chasing instead of flip-flopping at the edge. Otherwise patrol.
+  if (target && distance <= botAggroRange) bot.aggroUntil = now + botAggroMemoryMs;
+  const engaged = target && now < bot.aggroUntil;
 
-  if (target) {
+  if (engaged) {
     moveBotTowardTarget(bot, target, dt);
     tryBotAttack(room, bot, target);
   } else {
@@ -554,6 +563,16 @@ function wanderBot(bot, dt) {
   if (bot.nextWander <= 0) {
     bot.wander = randomFlatDirection();
     bot.nextWander = 0.8 + Math.random() * 1.8;
+  }
+
+  // Patrol near home: if it drifted too far, steer the wander back so bots stay in their room.
+  if (bot.home) {
+    const hx = bot.home.x - bot.position.x;
+    const hz = bot.home.z - bot.position.z;
+    const homeDist = Math.hypot(hx, hz);
+    if (homeDist > 9) {
+      bot.wander = { x: hx / homeDist, z: hz / homeDist };
+    }
   }
 
   const stats = classStats[bot.classId] || classStats.fighter;

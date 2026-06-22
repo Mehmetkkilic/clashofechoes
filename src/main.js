@@ -716,6 +716,11 @@ const MAPS = {
   },
 };
 
+// Local-enemy AI tuning (offline path). Bounds follow the active map footprint.
+const ENEMY_AGGRO_RANGE = 14;
+const ENEMY_BOUND_X = (MAPS[MAP_ID]?.ground?.halfX ?? 46) - 1;
+const ENEMY_BOUND_Z = (MAPS[MAP_ID]?.ground?.halfZ ?? 46) - 1;
+
 function loadDungeonModels() {
   let remaining = Object.keys(DUNGEON_MODELS).length;
   const done = () => {
@@ -2115,6 +2120,8 @@ function handlePeerDeath(victimId, death = {}) {
   if (death.killerId === multiplayer.id) {
     playSound("kill");
     addFeed(`${victimLabel} down`, death.label || "Elimination");
+    // PvE: killing a skeleton (server bot) drops a potion the killer can grab.
+    if (MANA_ENABLED && victim?.isBot && victim.group) spawnPotion(victim.group.position);
     return;
   }
 
@@ -4002,26 +4009,36 @@ function updateEnemies(dt) {
     toPlayer.y = 0;
     const distance = toPlayer.length();
 
+    // Patrol until the player comes within range, then chase (with brief memory).
+    if (distance <= ENEMY_AGGRO_RANGE) enemy.aggroUntil = performance.now() + 3000;
+    const engaged = performance.now() < (enemy.aggroUntil || 0);
+
     if (enemy.frozen <= 0) {
       let move = tmpVec2.set(0, 0, 0);
       if (enemy.fear > 0 && distance > 0.01) {
         move.copy(toPlayer).normalize().multiplyScalar(-1);
-      } else if (distance < 38 && distance > 2.2) {
+      } else if (engaged && distance > 2.2) {
         move.copy(toPlayer).normalize();
-      } else if (distance >= 38) {
+      } else {
         enemy.nextWander -= dt;
         if (enemy.nextWander <= 0) {
           enemy.wander.set(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
           enemy.nextWander = 1.2 + Math.random() * 2.5;
         }
-        move.copy(enemy.wander);
+        // Patrol near spawn: steer back if it drifted too far.
+        const home = enemy.spawn;
+        if (home && enemy.group.position.distanceTo(home) > 10) {
+          move.copy(home).sub(enemy.group.position).setY(0).normalize();
+        } else {
+          move.copy(enemy.wander);
+        }
       }
 
       enemy.group.position.addScaledVector(move, enemy.speed * dt);
       enemy.group.position.addScaledVector(enemy.knock, dt);
       enemy.knock.multiplyScalar(Math.pow(0.05, dt));
-      enemy.group.position.x = clamp(enemy.group.position.x, -46, 46);
-      enemy.group.position.z = clamp(enemy.group.position.z, -46, 46);
+      enemy.group.position.x = clamp(enemy.group.position.x, -ENEMY_BOUND_X, ENEMY_BOUND_X);
+      enemy.group.position.z = clamp(enemy.group.position.z, -ENEMY_BOUND_Z, ENEMY_BOUND_Z);
 
       if (move.lengthSq() > 0.01) {
         enemy.group.rotation.y = Math.atan2(move.x, move.z);
