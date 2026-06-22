@@ -3929,7 +3929,42 @@ function updateCamera() {
   const right = getFlatRight();
   const focus = player.position.clone();
   focus.y += TPS_FOCUS_Y;
-  camera.position.copy(focus).addScaledVector(dir, -TPS_DISTANCE).addScaledVector(right, TPS_SHOULDER);
+  const desired = focus.clone().addScaledVector(dir, -TPS_DISTANCE).addScaledVector(right, TPS_SHOULDER);
+  camera.position.copy(resolveCameraCollision(focus, desired));
+}
+
+// True if a wall/pillar collider occupies this point (camera-sized margin).
+function cameraPointBlocked(p) {
+  const margin = 0.3;
+  for (const c of worldColliders) {
+    if (p.y < c.minY || p.y > c.maxY) continue;
+    if (c.type === "box") {
+      if (p.x > c.minX - margin && p.x < c.maxX + margin && p.z > c.minZ - margin && p.z < c.maxZ + margin) {
+        return true;
+      }
+    } else if (c.type === "circle") {
+      if (horizontalDistance(p, c) < c.radius + margin) return true;
+    }
+  }
+  return false;
+}
+
+// Pull the camera in toward the focus if a wall sits between them, so it never clips behind geometry.
+function resolveCameraCollision(focus, desired) {
+  const toCam = desired.clone().sub(focus);
+  const maxDist = toCam.length();
+  if (maxDist < 0.001) return desired;
+  toCam.multiplyScalar(1 / maxDist);
+  const steps = 16;
+  const buffer = 0.35;
+  for (let i = 1; i <= steps; i++) {
+    const t = (i / steps) * maxDist;
+    if (cameraPointBlocked(focus.clone().addScaledVector(toCam, t))) {
+      const safe = Math.max(0.6, t - buffer);
+      return focus.clone().addScaledVector(toCam, safe);
+    }
+  }
+  return desired;
 }
 
 function updateLocalPlayerModel(dt) {
