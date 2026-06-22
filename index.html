@@ -151,26 +151,22 @@
 
       <div id="mobile-actions" class="mobile-actions" aria-hidden="true">
         <button class="mobile-btn jump jump-left" data-action="jump" type="button">⤒</button>
-        <div class="action-cluster">
-          <div class="ab-row">
-            <button class="mobile-btn ab" data-action="q" data-slot="q" type="button">
-              <span class="mb-label">Q</span><span class="mb-cd"></span>
-            </button>
-            <button class="mobile-btn ab" data-action="e" data-slot="e" type="button">
-              <span class="mb-label">E</span><span class="mb-cd"></span>
-            </button>
-            <button class="mobile-btn ab" data-action="r" data-slot="r" type="button">
-              <span class="mb-label">R</span><span class="mb-cd"></span>
-            </button>
-          </div>
-          <div class="main-row">
-            <button class="mobile-btn special" data-action="secondary" data-slot="secondary" type="button">
-              <span class="mb-label">⛨</span><span class="mb-cd"></span>
-            </button>
-            <button class="mobile-btn attack" data-action="primary" data-slot="primary" type="button">
-              <span class="mb-label">⚔</span><span class="mb-cd"></span>
-            </button>
-          </div>
+        <div id="radial" class="radial">
+          <button class="mobile-btn ab radial-item" data-slot="secondary" data-angle="214" type="button">
+            <span class="mb-label">⛨</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab radial-item" data-slot="q" data-angle="176" type="button">
+            <span class="mb-label">Q</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab radial-item" data-slot="e" data-angle="138" type="button">
+            <span class="mb-label">E</span><span class="mb-cd"></span>
+          </button>
+          <button class="mobile-btn ab radial-item" data-slot="r" data-angle="100" type="button">
+            <span class="mb-label">R</span><span class="mb-cd"></span>
+          </button>
+          <button id="attack-btn" class="mobile-btn attack" data-slot="primary" type="button">
+            <span class="mb-label">⚔</span><span class="mb-cd"></span>
+          </button>
         </div>
       </div>
 

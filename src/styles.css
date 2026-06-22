@@ -1156,40 +1156,50 @@ body.touch.playing .mobile-actions {
   min-height: 12px;
 }
 
-.action-cluster {
+/* Press-and-hold radial: only the attack button shows; abilities fan out on hold. */
+.radial {
   position: fixed;
-  right: calc(env(safe-area-inset-right, 0px) + 14px);
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  right: calc(env(safe-area-inset-right, 0px) + 44px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 46px);
+  width: 0;
+  height: 0;
 }
 
-.action-cluster .ab-row,
-.action-cluster .main-row {
-  display: flex;
-  gap: 9px;
-  align-items: flex-end;
-}
-
-/* Secondary abilities are smaller and dimmer so the cluster reads less crowded. */
-.mobile-btn.ab {
-  width: 44px;
-  height: 44px;
-  font-size: 14px;
-  opacity: 0.82;
+#attack-btn {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .mobile-btn.attack {
-  width: 62px;
-  height: 62px;
+  width: 64px;
+  height: 64px;
   border-color: rgba(224, 82, 69, 0.6);
   font-size: 22px;
 }
 
-.mobile-btn.special {
-  border-color: rgba(225, 181, 96, 0.55);
+.radial-item {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  font-size: 14px;
+  /* collapsed into the attack button until the radial opens */
+  transform: translate(-50%, -50%) scale(0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.radial.open .radial-item {
+  opacity: 0.95;
+}
+
+.radial-item.selected {
+  border-color: rgba(107, 211, 145, 0.95);
+  background: rgba(107, 211, 145, 0.32);
 }
 
 /* Jump lives on the movement (left) thumb, above the joystick. */
