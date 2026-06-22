@@ -817,12 +817,21 @@ const ENEMY_AGGRO_RANGE = 14;
 const ENEMY_BOUND_X = (MAPS[MAP_ID]?.ground?.halfX ?? 46) - 1;
 const ENEMY_BOUND_Z = (MAPS[MAP_ID]?.ground?.halfZ ?? 46) - 1;
 
+// Village props are only needed on the village map — don't load them elsewhere.
+const VILLAGE_KEYS = new Set([
+  "home_a", "home_b", "market", "church", "blacksmith",
+  "tree_a", "tree_b", "trees", "rock", "vbarrel", "vcrate", "flag",
+]);
+
 function loadDungeonModels() {
-  let remaining = Object.keys(DUNGEON_MODELS).length;
+  const entries = Object.entries(DUNGEON_MODELS).filter(
+    ([key]) => MAP_ID === "village" || !VILLAGE_KEYS.has(key)
+  );
+  let remaining = entries.length;
   const done = () => {
     if (--remaining <= 0) onDungeonAssetsReady();
   };
-  for (const [key, url] of Object.entries(DUNGEON_MODELS)) {
+  for (const [key, url] of entries) {
     gltfLoader.load(
       url,
       (gltf) => {
@@ -1019,6 +1028,8 @@ function scatterPlagueProps(list) {
 function onDungeonAssetsReady() {
   if (!MAPS[MAP_ID]) dressArena();
   else buildMapDressing(MAPS[MAP_ID]);
+  worldReady = true; // map is dressed — safe to leave the loading screen
+  maybeReveal();
 }
 
 function tileFloorArea(halfX, halfZ, topY = 0.05, faceDown = false, floorKey = "floor") {
@@ -1192,7 +1203,10 @@ function loadCharacterModels() {
   // those are ready (success or error) instead of waiting on every decoration asset.
   let remaining = Object.keys(CHARACTER_MODELS).length;
   const done = () => {
-    if (--remaining <= 0) revealMainMenu();
+    if (--remaining <= 0) {
+      charsReady = true;
+      maybeReveal();
+    }
   };
   for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
     gltfLoader.load(
@@ -3833,6 +3847,14 @@ function stopPreview() {
 }
 
 let mainMenuShown = false;
+let charsReady = false;
+let worldReady = false;
+
+// Keep the loading screen up until BOTH the characters and the map's world are ready,
+// so the player never drops into a half-built (black) scene.
+function maybeReveal() {
+  if (charsReady && worldReady) revealMainMenu();
+}
 
 function setLoadingProgress(frac) {
   const pct = Math.round(clamp(frac, 0, 1) * 100);
@@ -3906,7 +3928,7 @@ function setupMenus() {
   ui.settingsClose?.addEventListener("click", closeSettings);
 
   // Safety: if asset loading stalls, reveal the menu anyway.
-  setTimeout(revealMainMenu, 5000);
+  setTimeout(revealMainMenu, 15000); // hard safety only for a true network stall
 }
 
 let settingsOpen = false;
