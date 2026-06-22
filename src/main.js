@@ -503,6 +503,18 @@ const CHARACTER_FOOT_LIFT = 0.05; // small lift onto the floor tiles (origin = f
 const TPS_DISTANCE = 4.5;
 const TPS_FOCUS_Y = 0.4;
 const TPS_SHOULDER = 0.7;
+// Isometric (ARPG) camera: fixed offset above/behind the player; tune for angle/zoom.
+const ISO_OFFSET = new THREE.Vector3(0, 17, 13);
+const ISO_FOCUS_Y = 0.6;
+// Screen-relative movement axes (camera is fixed looking down -Z): W=up=-Z, D=right=+X.
+const SCREEN_FWD = new THREE.Vector3(0, 0, -1);
+const SCREEN_RIGHT = new THREE.Vector3(1, 0, 0);
+// Cursor aim: raycast the pointer onto the ground plane each frame.
+const aimNDC = new THREE.Vector2(0, 0);
+const aimRaycaster = new THREE.Raycaster();
+const aimGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const aimPoint = new THREE.Vector3(0, 0, -6);
+const aimHit = new THREE.Vector3();
 const modelCache = new Map();
 const loadingManager = new THREE.LoadingManager();
 const gltfLoader = new GLTFLoader(loadingManager);
@@ -1088,7 +1100,7 @@ function buildMapDressing(def) {
   const wallKey = def.tiles?.wall ?? "wall";
   tileFloorArea(g.halfX, g.halfZ, 0.05, false, floorKey);
   tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2, wallKey);
-  if (def.ceiling) tileFloorArea(g.halfX, g.halfZ, def.ceiling.y ?? 8, true, floorKey); // stone roof
+  // Isometric view looks down into the rooms, so no closed ceiling.
   for (const w of def.walls || []) tileWallSegment(w, 2, wallKey); // interior room walls
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
@@ -3187,31 +3199,18 @@ function bindEvents() {
     setLightingLevel(Number(event.target.value) / 100);
   });
 
-  document.addEventListener("pointerlockchange", () => {
-    const locked = document.pointerLockElement === canvas;
-    controlsLocked = locked;
-    ui.lockPanel.classList.toggle("hidden", locked || settingsOpen);
-    document.body.classList.toggle("playing", locked || settingsOpen);
-    if (locked) stopPreview();
-    if (locked && !matchStarted) {
-      matchStarted = true;
-      commitPlayerName();
-      addFeed("Match started", "Arena");
-      sendMultiplayerState(true);
-    }
-  });
-
+  // Isometric: no pointer lock. Track the cursor in NDC for ground-aim raycasting.
   document.addEventListener("mousemove", (event) => {
-    if (document.pointerLockElement !== canvas) return;
-    yaw -= event.movementX * 0.0022;
-    pitch -= event.movementY * 0.002;
-    pitch = clamp(pitch, -1.32, 1.18);
+    aimNDC.x = (event.clientX / window.innerWidth) * 2 - 1;
+    aimNDC.y = -(event.clientY / window.innerHeight) * 2 + 1;
   });
 
   window.addEventListener("contextmenu", (event) => event.preventDefault());
 
   window.addEventListener("mousedown", (event) => {
-    if (document.pointerLockElement !== canvas) return;
+    if (!controlsLocked || settingsOpen) return;
+    if (event.target && event.target.closest && event.target.closest(".hud, .menu-screen, .lock-panel, button"))
+      return; // let UI clicks through
     unlockAudio();
     if (event.button === 0) usePrimary();
     if (event.button === 2) useSecondaryDown();
@@ -3326,13 +3325,11 @@ function bindEvents() {
   });
 }
 
+// Isometric has no pointer lock — entering the arena just resumes input + starts the match.
 function requestArenaPointerLock() {
-  if (document.pointerLockElement === canvas) return;
-  const request = canvas.requestPointerLock?.();
-  if (request?.catch) request.catch(() => {});
+  startMobileArena();
 }
 
-// Touch devices cannot use pointer lock, so enter the arena directly.
 function startMobileArena() {
   controlsLocked = true;
   ui.lockPanel.classList.add("hidden");
@@ -3374,13 +3371,9 @@ function setupMobileControls() {
   lookZone.addEventListener(
     "touchmove",
     (event) => {
+      // Isometric: camera is fixed; aim follows movement direction (handled in updateAim).
       for (const t of event.changedTouches) {
         if (t.identifier !== lookId) continue;
-        yaw -= (t.clientX - lookX) * 0.004;
-        pitch -= (t.clientY - lookY) * 0.004;
-        pitch = clamp(pitch, -1.32, 1.18);
-        lookX = t.clientX;
-        lookY = t.clientY;
       }
       event.preventDefault();
     },
@@ -3710,20 +3703,21 @@ function setupMenus() {
 
 let settingsOpen = false;
 
+let resumeAfterSettings = false;
+
 function openSettings() {
   if (!ui.settingsPanel) return;
   settingsOpen = true;
   ui.settingsPanel.classList.remove("hidden");
-  // Desktop: release the mouse so the panel is clickable (guarded so the hero
-  // lock-panel doesn't pop up while settings is open).
-  if (!isTouch && document.pointerLockElement) document.exitPointerLock();
+  resumeAfterSettings = controlsLocked;
+  controlsLocked = false; // pause input while the panel is open
 }
 
 function closeSettings() {
   settingsOpen = false;
   ui.settingsPanel?.classList.add("hidden");
-  // Desktop: resume the game by re-locking the pointer.
-  if (!isTouch && matchStarted) requestArenaPointerLock();
+  if (resumeAfterSettings) controlsLocked = true; // resume if we were playing
+  resumeAfterSettings = false;
 }
 
 function tick() {
@@ -3755,6 +3749,7 @@ function update(dt) {
 
   updatePlayer(dt);
   updateCamera();
+  if (controlsLocked) updateAim();
   updateLocalPlayerModel(dt);
   updateWeapon(dt);
   updateProjectiles(dt);
@@ -3792,8 +3787,9 @@ function updatePlayer(dt) {
   if (!controlsLocked) return;
 
   const classData = CLASS_DATA[player.classId];
-  const forward = getFlatForward();
-  const right = getFlatRight();
+  // Isometric: movement is screen-relative (camera-fixed), independent of facing/aim.
+  const forward = SCREEN_FWD;
+  const right = SCREEN_RIGHT;
   const wish = new THREE.Vector3();
   if (input.forward) wish.add(forward);
   if (input.back) wish.sub(forward);
@@ -3810,7 +3806,7 @@ function updatePlayer(dt) {
   if (player.chargingShot) speed *= 0.72;
   if (player.chargeRush > 0) {
     speed = 18.8;
-    wish.copy(forward);
+    wish.copy(getFlatForward()); // charge toward the aim/facing direction
     player.chargeRush -= dt;
     checkChargeHits();
   }
@@ -3942,14 +3938,12 @@ function updateFootsteps(dt, moving, fast) {
 }
 
 function updateCamera() {
-  camera.rotation.set(pitch, yaw, 0);
-  camera.updateMatrixWorld();
-  const dir = getCameraForward();
-  const right = getFlatRight();
+  // Fixed isometric (ARPG) camera: hover above/behind the player, look down at them.
   const focus = player.position.clone();
-  focus.y += TPS_FOCUS_Y;
-  const desired = focus.clone().addScaledVector(dir, -TPS_DISTANCE).addScaledVector(right, TPS_SHOULDER);
-  camera.position.copy(resolveCameraCollision(focus, desired));
+  focus.y += ISO_FOCUS_Y;
+  camera.position.copy(focus).add(ISO_OFFSET);
+  camera.lookAt(focus);
+  camera.updateMatrixWorld();
 }
 
 // True if a wall/pillar collider occupies this point (camera-sized margin).
@@ -4854,8 +4848,8 @@ function spawnProjectile({
   shape = "sphere",
   extra = {},
 }) {
-  const direction = getCameraForward();
-  // Third-person: fire from the character's chest toward the crosshair, not the camera.
+  const direction = getAimDirection();
+  // Fire from the character's chest toward the cursor's ground point (horizontal).
   const start = player.position.clone();
   start.y -= 0.25;
   start.add(direction.clone().multiplyScalar(1.0));
@@ -5219,6 +5213,33 @@ function getCameraForward() {
   return direction.normalize();
 }
 
+// Horizontal aim direction (player -> cursor ground point). Used for projectiles/abilities.
+function getAimDirection() {
+  const dir = new THREE.Vector3(aimPoint.x - player.position.x, 0, aimPoint.z - player.position.z);
+  if (dir.lengthSq() < 0.0001) return getFlatForward();
+  return dir.normalize();
+}
+
+// Per-frame: resolve the cursor (or movement on touch) into an aim point + facing yaw.
+function updateAim() {
+  if (isTouch) {
+    if (touchMove.active && (touchMove.x || touchMove.y)) {
+      const wx = SCREEN_RIGHT.x * touchMove.x + SCREEN_FWD.x * -touchMove.y;
+      const wz = SCREEN_RIGHT.z * touchMove.x + SCREEN_FWD.z * -touchMove.y;
+      if (wx || wz) yaw = Math.atan2(-wx, -wz);
+    }
+    aimPoint.copy(player.position).addScaledVector(getFlatForward(), 6);
+    return;
+  }
+  aimRaycaster.setFromCamera(aimNDC, camera);
+  if (aimRaycaster.ray.intersectPlane(aimGroundPlane, aimHit)) {
+    aimPoint.copy(aimHit);
+    const dx = aimPoint.x - player.position.x;
+    const dz = aimPoint.z - player.position.z;
+    if (dx * dx + dz * dz > 0.05) yaw = Math.atan2(-dx, -dz);
+  }
+}
+
 function getFlatForward() {
   return new THREE.Vector3(0, 0, -1).applyAxisAngle(upAxis, yaw).normalize();
 }
@@ -5314,17 +5335,11 @@ function updateMinimap(dt) {
 }
 
 function getAimGroundPoint(maxDistance) {
-  const direction = getCameraForward();
-  const origin = camera.position.clone();
-  if (Math.abs(direction.y) > 0.01) {
-    const t = -origin.y / direction.y;
-    if (t > 0 && t < maxDistance) {
-      return origin.add(direction.multiplyScalar(t));
-    }
-  }
-
-  const flat = getFlatForward();
-  return player.position.clone().add(flat.multiplyScalar(maxDistance));
+  // Cursor ground point (updated each frame), clamped to the ability's max range.
+  const to = new THREE.Vector3(aimPoint.x - player.position.x, 0, aimPoint.z - player.position.z);
+  const dist = to.length();
+  if (dist > maxDistance) to.multiplyScalar(maxDistance / dist);
+  return player.position.clone().add(to);
 }
 
 function isEnemyInFront(enemy) {
