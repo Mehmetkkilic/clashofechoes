@@ -435,6 +435,7 @@ function getRoom(name) {
 }
 
 function botName(bot) {
+  if (bot.boss) return "Boss";
   return `${bot.classId === "skeleton" ? "Skeleton" : "Bot"} ${bot.slot + 1}`;
 }
 
@@ -448,14 +449,22 @@ function ensureRoomBots(room) {
     const stats = classStats[classId] || classStats.fighter;
     const spawns = room.spawns || botSpawnPoints;
     const spawn = spawns[slot % spawns.length];
+    // PvE: the first skeleton is a Boss — tanky, bigger, hits harder.
+    const isBoss = room.mode === "pve" && slot === 0;
+    const hp = isBoss ? 320 : stats.hp;
     const bot = {
       id: `bot:${room.botSeed}:${slot}`,
       slot,
       classId,
+      boss: isBoss,
+      scale: isBoss ? 2.2 : 1,
+      damage: isBoss ? 22 : 12,
+      attackRange: isBoss ? 3.4 : 2.75,
+      speedMult: isBoss ? 0.78 : 1,
       bounds: room.bounds,
       spawns,
-      hp: stats.hp,
-      maxHp: stats.hp,
+      hp,
+      maxHp: hp,
       score: 0,
       deaths: 0,
       dead: false,
@@ -552,7 +561,7 @@ function moveBotTowardTarget(bot, target, dt) {
   if (distance <= 2.55) return;
 
   const stats = classStats[bot.classId] || classStats.fighter;
-  const step = Math.min(distance - 2.2, stats.speed * dt);
+  const step = Math.min(distance - 2.2, stats.speed * (bot.speedMult || 1) * dt);
   bot.position.x += (dx / distance) * step;
   bot.position.z += (dz / distance) * step;
   clampBotPosition(bot);
@@ -585,7 +594,7 @@ function wanderBot(bot, dt) {
 function tryBotAttack(room, bot, target) {
   if (bot.attackCd > 0 || !target.state) return;
   const distance = horizontalDistance(bot.position, target.state.position);
-  if (distance > 2.75) return;
+  if (distance > (bot.attackRange || 2.75)) return;
   // Don't let ground bots hit a player standing on a raised platform.
   if (Math.abs((bot.position.y || 0) - (target.state.position.y || 0)) > 2.5) return;
 
@@ -609,10 +618,10 @@ function tryBotAttack(room, bot, target) {
     attackerId: bot.id,
     hit: {
       targetId: target.id,
-      amount: 12,
-      label: "Bot Slash",
+      amount: bot.damage || 12,
+      label: bot.boss ? "Boss Smash" : "Bot Slash",
       color: stats.color,
-      knock: 5,
+      knock: bot.boss ? 9 : 5,
     },
   });
 }
@@ -866,6 +875,8 @@ function botState(bot) {
     chargingShot: false,
     dead: bot.dead,
     bot: true,
+    boss: bot.boss || false,
+    scale: bot.scale || 1,
     name: botName(bot),
     position: {
       x: bot.position.x,

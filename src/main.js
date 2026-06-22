@@ -43,6 +43,10 @@ const ui = {
   manaLabel: document.querySelector("#mana-hud .mana-label"),
   manaBar: document.querySelector("#mana-bar"),
   manaText: document.querySelector("#mana-text"),
+  minimap: document.querySelector("#minimap"),
+  bossHud: document.querySelector("#boss-hud"),
+  bossBar: document.querySelector("#boss-bar"),
+  bossHpText: document.querySelector("#boss-hp-text"),
   className: document.querySelector("#class-name"),
   score: document.querySelector("#score"),
   deaths: document.querySelector("#deaths"),
@@ -2919,6 +2923,11 @@ function createRemotePlayer(id, state) {
     weapon.visible = false;
   }
 
+  if (state.boss) {
+    group.scale.setScalar(state.scale || 2.2); // bigger, menacing
+    fill.material.color.set(0xe0594a); // red boss health bar
+  }
+
   return {
     id,
     group,
@@ -2928,6 +2937,7 @@ function createRemotePlayer(id, state) {
     char,
     nameSprite,
     isBot: Boolean(state.bot),
+    isBoss: Boolean(state.boss),
     displayName: displayRemoteName(state, id),
     classId: state.classId,
     healthFill: fill,
@@ -2948,6 +2958,7 @@ function updateRemotePlayer(id, state) {
 
   remote.state = state;
   remote.isBot = Boolean(state.bot);
+  remote.isBoss = Boolean(state.boss);
   const nextName = displayRemoteName(state, id);
   if (remote.displayName !== nextName) {
     updateNameSprite(remote, nextName);
@@ -3220,6 +3231,13 @@ function bindEvents() {
     }
 
     if (document.activeElement === ui.nickInput) return;
+
+    if (event.code === "Escape") {
+      // Desktop: pointer lock makes the gear unclickable, so Escape toggles settings.
+      if (settingsOpen) closeSettings();
+      else if (controlsLocked) openSettings();
+      return;
+    }
 
     switch (event.code) {
       case "KeyW":
@@ -3747,6 +3765,7 @@ function update(dt) {
   updateRemotePlayers(dt);
   sendMultiplayerState();
   updateFloatingMessages(dt);
+  updateMinimap(dt);
   updateHud();
 }
 
@@ -5208,6 +5227,92 @@ function getFlatRight() {
   return new THREE.Vector3(1, 0, 0).applyAxisAngle(upAxis, yaw).normalize();
 }
 
+// Show a raid-style boss bar when a living boss is near the player.
+function updateBossHud() {
+  let boss = null;
+  for (const remote of remotePlayers.values()) {
+    if (remote.isBoss && !remote.state?.dead) {
+      boss = remote;
+      break;
+    }
+  }
+  let near = false;
+  if (boss) {
+    const bp = boss.group.position;
+    near = Math.hypot(bp.x - player.position.x, bp.z - player.position.z) < 32;
+  }
+  ui.bossHud.classList.toggle("hidden", !near);
+  if (near) {
+    const frac = clamp((boss.state.hp ?? 0) / Math.max(1, boss.state.maxHp ?? 1), 0, 1);
+    ui.bossBar.style.transform = `scaleX(${frac})`;
+    ui.bossHpText.textContent = `${Math.ceil(boss.state.hp)} / ${boss.state.maxHp}`;
+  }
+}
+
+let minimapAccum = 0;
+const minimapCtx = ui.minimap ? ui.minimap.getContext("2d") : null;
+
+// Top-down mini-map: walls + player (facing) + enemy/player blips. Visual only.
+function updateMinimap(dt) {
+  if (!minimapCtx) return;
+  const def = MAPS[MAP_ID];
+  if (!def) return;
+  minimapAccum += dt;
+  if (minimapAccum < 0.066) return; // ~15 fps
+  minimapAccum = 0;
+
+  const ctx = minimapCtx;
+  const size = ui.minimap.width;
+  const pad = 10;
+  const span = size - pad * 2;
+  const halfX = def.ground.halfX;
+  const halfZ = def.ground.halfZ;
+  const toX = (x) => pad + ((x + halfX) / (halfX * 2)) * span;
+  const toY = (z) => pad + ((z + halfZ) / (halfZ * 2)) * span;
+  const blip = (x, z, r) => {
+    ctx.beginPath();
+    ctx.arc(toX(x), toY(z), r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.strokeStyle = "rgba(214,204,176,0.85)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (const w of def.walls || []) {
+    ctx.moveTo(toX(w.x1), toY(w.z1));
+    ctx.lineTo(toX(w.x2), toY(w.z2));
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "#e0594a"; // enemies
+  for (const remote of remotePlayers.values()) {
+    if (remote.isBot && !remote.state?.dead) blip(remote.group.position.x, remote.group.position.z, remote.state?.boss ? 6 : 3.5);
+  }
+  for (const e of enemies) {
+    if (e.alive) blip(e.group.position.x, e.group.position.z, 3.5);
+  }
+
+  ctx.fillStyle = "#5cc9e6"; // other players
+  for (const remote of remotePlayers.values()) {
+    if (!remote.isBot && !remote.state?.dead) blip(remote.group.position.x, remote.group.position.z, 3.5);
+  }
+
+  // local player — arrow pointing along facing
+  const fwd = getFlatForward();
+  ctx.save();
+  ctx.translate(toX(player.position.x), toY(player.position.z));
+  ctx.rotate(Math.atan2(fwd.z, fwd.x));
+  ctx.fillStyle = "#e1b560";
+  ctx.beginPath();
+  ctx.moveTo(7, 0);
+  ctx.lineTo(-4, 4.5);
+  ctx.lineTo(-4, -4.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 function getAimGroundPoint(maxDistance) {
   const direction = getCameraForward();
   const origin = camera.position.clone();
@@ -5280,6 +5385,7 @@ function updateHud() {
     ui.manaBar.style.transform = `scaleX(${clamp(resPercent, 0, 1)})`;
     ui.manaText.textContent = `${Math.ceil(player.resource)} / ${player.maxResource}`;
   }
+  if (ui.bossHud) updateBossHud();
   ui.score.textContent = String(player.score);
   ui.deaths.textContent = String(player.deaths);
 

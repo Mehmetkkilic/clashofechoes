@@ -53,6 +53,53 @@ button {
   backdrop-filter: blur(10px);
 }
 
+.boss-hud {
+  top: calc(env(safe-area-inset-top, 0px) + 86px);
+  left: 50%;
+  width: min(360px, calc(100vw - 40px));
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border-color: rgba(224, 89, 74, 0.6);
+}
+
+.boss-hud .health-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.boss-hud #boss-name {
+  color: #f0a24a;
+}
+
+.boss-fill {
+  background: linear-gradient(90deg, #e0594a, #f0a24a);
+}
+
+.boss-hud.hidden {
+  display: none;
+}
+
+.minimap {
+  position: fixed;
+  z-index: 3;
+  top: calc(env(safe-area-inset-top, 0px) + 92px);
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  width: 132px;
+  height: 132px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(10, 14, 14, 0.5);
+  pointer-events: none;
+  display: none;
+}
+
+body.playing .minimap {
+  display: block;
+}
+
 .top-hud {
   top: 14px;
   left: 14px;
