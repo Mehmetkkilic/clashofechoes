@@ -22,11 +22,17 @@ const matchKillLimit = 20;
 const matchResetDelayMs = 5500;
 
 const botClasses = ["fighter", "ranger"];
+// Per-mode bot roster: PvP = human-class sparring bots, PvE = skeleton swarm.
+const modeBots = {
+  pvp: { classes: ["fighter", "ranger"], count: 2 },
+  pve: { classes: ["skeleton"], count: 5 },
+};
 const classStats = {
   fighter: { hp: 150, speed: 4.8, color: 0xe0a34f },
   priest: { hp: 100, speed: 5.0, color: 0xf26f45 },
   ranger: { hp: 100, speed: 5.4, color: 0x5cc9e6 },
   witch: { hp: 90, speed: 5.1, color: 0x8fdc3c },
+  skeleton: { hp: 90, speed: 4.6, color: 0xb8b3a0 },
 };
 
 const botSpawnPoints = [
@@ -85,6 +91,10 @@ const MAP_BOUNDS = {
 function mapForRoom(name) {
   const id = String(name).split(":")[1] || "castle";
   return MAP_BOUNDS[id] ? id : "castle";
+}
+
+function modeForRoom(name) {
+  return String(name).split(":").includes("pvp") ? "pvp" : "pve";
 }
 
 const mimeTypes = {
@@ -394,10 +404,15 @@ function getRoom(name) {
   if (!room) {
     const mapId = mapForRoom(name);
     const bounds = MAP_BOUNDS[mapId];
+    const mode = modeForRoom(name);
+    const roster = modeBots[mode] || modeBots.pve;
     room = {
       name,
       mapId,
       bounds,
+      mode,
+      botClasses: roster.classes,
+      botCount: roster.count,
       spawns: bounds.spawns,
       bots: new Map(),
       scores: new Map(),
@@ -417,11 +432,17 @@ function getRoom(name) {
   return room;
 }
 
+function botName(bot) {
+  return `${bot.classId === "skeleton" ? "Skeleton" : "Bot"} ${bot.slot + 1}`;
+}
+
 function ensureRoomBots(room) {
-  while (room.bots.size < botsPerRoom) {
+  const roster = room.botClasses || botClasses;
+  const count = room.botCount ?? botsPerRoom;
+  while (room.bots.size < count) {
     const slot = room.nextBotSlot;
     room.nextBotSlot += 1;
-    const classId = botClasses[slot % botClasses.length];
+    const classId = roster[slot % roster.length];
     const stats = classStats[classId] || classStats.fighter;
     const spawns = room.spawns || botSpawnPoints;
     const spawn = spawns[slot % spawns.length];
@@ -450,7 +471,7 @@ function ensureRoomBots(room) {
     };
     room.bots.set(bot.id, bot);
     ensureScoreRow(room, bot.id, {
-      name: `Bot ${bot.slot + 1}`,
+      name: botName(bot),
       classId: bot.classId,
       bot: true,
       ready: true,
@@ -681,12 +702,12 @@ function recordKill(room, killerId, victimId, label = "Elimination") {
   const victimIsBot = room.bots.has(victimId);
   const killer = ensureScoreRow(room, killerId, {
     bot: killerIsBot,
-    name: killerIsBot ? `Bot ${room.bots.get(killerId).slot + 1}` : undefined,
+    name: killerIsBot ? botName(room.bots.get(killerId)) : undefined,
     classId: killerIsBot ? room.bots.get(killerId).classId : undefined,
   });
   const victim = ensureScoreRow(room, victimId, {
     bot: victimIsBot,
-    name: victimIsBot ? `Bot ${room.bots.get(victimId).slot + 1}` : undefined,
+    name: victimIsBot ? botName(room.bots.get(victimId)) : undefined,
     classId: victimIsBot ? room.bots.get(victimId).classId : undefined,
   });
 
@@ -773,7 +794,7 @@ function scoreboardMessage(room) {
   }
   for (const bot of room.bots.values()) {
     const row = ensureScoreRow(room, bot.id, {
-      name: `Bot ${bot.slot + 1}`,
+      name: botName(bot),
       classId: bot.classId,
       bot: true,
       ready: true,
@@ -808,7 +829,7 @@ function botState(bot) {
     chargingShot: false,
     dead: bot.dead,
     bot: true,
-    name: `Bot ${bot.slot + 1}`,
+    name: botName(bot),
     position: {
       x: bot.position.x,
       y: bot.position.y,

@@ -148,6 +148,18 @@ const CLASS_DATA = {
     e: "Fear",
     r: "Banshee Scream",
   },
+  // PvE enemy — not player-selectable (hero-select cards are static). Only nameplate/scoreboard read this.
+  skeleton: {
+    name: "Skeleton",
+    hp: 90,
+    speed: 6.0,
+    accent: 0xb8b3a0,
+    primary: "Bone Strike",
+    secondary: "Bone Strike",
+    q: "Bone Strike",
+    e: "Bone Strike",
+    r: "Bone Strike",
+  },
 };
 
 const cooldowns = {
@@ -543,6 +555,7 @@ const PROP_HEIGHTS = {
   banner: 3.2,
 };
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
+const MODE = (new URLSearchParams(window.location.search).get("mode") || "pve").toLowerCase() === "pvp" ? "pvp" : "pve";
 let spawnPoint = new THREE.Vector3(0, PLAYER_EYE_HEIGHT, 18);
 
 // Emit the 4 wall segments of a room; sides with a door get a centered gap.
@@ -1178,6 +1191,8 @@ init();
 
 function init() {
   const customMap = !!MAPS[MAP_ID];
+  const objEl = document.getElementById("objective-text");
+  if (objEl) objEl.textContent = MODE === "pvp" ? "Eliminate Heroes" : "Defeat the Swarm";
   setupWorld();
   if (!customMap) setupLights();
   setupPostProcessing();
@@ -1187,7 +1202,7 @@ function init() {
   else setupArena();
   loadDungeonModels();
   setupPlayerWeapon();
-  spawnEnemies();
+  if (MODE === "pve") spawnEnemies(); // local skeleton enemies only in PvE
   bindEvents();
   setupMobileControls();
   setupCharacterPreview();
@@ -1600,8 +1615,10 @@ function initMultiplayer() {
   const params = new URLSearchParams(window.location.search);
   const explicitServer = params.get("server");
   const baseRoom = params.get("room") || "public";
-  // Group players by map so the server can place bots within the right bounds.
-  multiplayer.room = MAP_ID === "castle" ? baseRoom : `${baseRoom}:${MAP_ID}`;
+  // Group players by map (bot bounds) and mode (PvE skeletons vs PvP heroes) into separate rooms.
+  let room = MAP_ID === "castle" ? baseRoom : `${baseRoom}:${MAP_ID}`;
+  if (MODE === "pvp") room += ":pvp";
+  multiplayer.room = room;
   multiplayer.serverUrl = resolveMultiplayerServerUrl(explicitServer);
 
   if (!multiplayer.serverUrl) {
@@ -3690,7 +3707,7 @@ function showLeaderboard() {
 }
 
 function setupMenus() {
-  document.querySelectorAll(".map-button").forEach((btn) => {
+  document.querySelectorAll(".map-button[data-map]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.map === MAP_ID);
     btn.addEventListener("click", () => {
       if (btn.dataset.map === MAP_ID) return;
@@ -3698,6 +3715,17 @@ function setupMenus() {
       if (btn.dataset.map === "castle") params.delete("map");
       else params.set("map", btn.dataset.map);
       window.location.search = params.toString(); // reload into the chosen map
+    });
+  });
+
+  document.querySelectorAll(".mode-button[data-mode]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === MODE);
+    btn.addEventListener("click", () => {
+      if (btn.dataset.mode === MODE) return;
+      const params = new URLSearchParams(window.location.search);
+      if (btn.dataset.mode === "pve") params.delete("mode");
+      else params.set("mode", btn.dataset.mode);
+      window.location.search = params.toString(); // reload into the chosen mode
     });
   });
 
