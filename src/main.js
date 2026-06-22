@@ -3457,7 +3457,8 @@ function setupMobileControls() {
   joyZone.addEventListener("touchend", endJoy);
   joyZone.addEventListener("touchcancel", endJoy);
 
-  document.querySelectorAll("#mobile-actions .mobile-btn").forEach((btn) => {
+  // Simple buttons (jump) keep direct press handling.
+  document.querySelectorAll("#mobile-actions .mobile-btn[data-action]").forEach((btn) => {
     const action = btn.dataset.action;
     btn.addEventListener(
       "touchstart",
@@ -3480,11 +3481,123 @@ function setupMobileControls() {
     );
   });
 
+  setupRadialAttack();
+
   if (ui.classToggle && ui.classHud) {
     ui.classToggle.addEventListener("click", () => {
       ui.classHud.classList.toggle("open");
     });
   }
+}
+
+// Press-and-hold the attack button: ability buttons fan out; slide the thumb to one and
+// release to use it; a quick tap (no slide) is a primary attack.
+function setupRadialAttack() {
+  const radial = document.querySelector("#radial");
+  const attackBtn = document.querySelector("#attack-btn");
+  if (!radial || !attackBtn) return;
+  const items = Array.from(radial.querySelectorAll(".radial-item")).map((el) => {
+    const angle = (Number(el.dataset.angle) || 0) * (Math.PI / 180);
+    const radius = 86;
+    return { el, slot: el.dataset.slot, angle, x: Math.cos(angle) * radius, y: -Math.sin(angle) * radius };
+  });
+
+  let active = false;
+  let opened = false;
+  let openTimer = 0;
+  let cx = 0;
+  let cy = 0;
+  let selected = null;
+
+  const open = () => {
+    if (opened) return;
+    opened = true;
+    selected = null;
+    radial.classList.add("open");
+    for (const it of items) {
+      it.el.style.transform = `translate(calc(-50% + ${it.x}px), calc(-50% + ${it.y}px)) scale(1)`;
+      it.el.classList.remove("selected");
+    }
+  };
+  const move = (t) => {
+    if (!active) return;
+    const dx = t.clientX - cx;
+    const dy = t.clientY - cy;
+    if (!opened && Math.hypot(dx, dy) > 24) open(); // slide also opens it early
+    if (!opened) return;
+    if (Math.hypot(dx, dy) < 36) {
+      selected = null;
+    } else {
+      const a = Math.atan2(-dy, dx);
+      let best = null;
+      let bestDiff = Infinity;
+      for (const it of items) {
+        let d = Math.abs(a - it.angle);
+        if (d > Math.PI) d = Math.PI * 2 - d;
+        if (d < bestDiff) {
+          bestDiff = d;
+          best = it;
+        }
+      }
+      selected = best && bestDiff < 0.45 ? best.slot : null;
+    }
+    for (const it of items) it.el.classList.toggle("selected", it.slot === selected);
+  };
+  const close = () => {
+    if (!active) return;
+    active = false;
+    clearTimeout(openTimer);
+    radial.classList.remove("open");
+    for (const it of items) {
+      it.el.style.transform = "translate(-50%, -50%) scale(0.4)";
+      it.el.classList.remove("selected");
+    }
+    // Quick tap (radial never opened) or release without a selection = primary attack.
+    if (opened && selected === "secondary") {
+      useSecondaryDown();
+      useSecondaryUp();
+    } else if (opened && selected) {
+      useAbility(selected);
+    } else {
+      usePrimary();
+    }
+    opened = false;
+    selected = null;
+  };
+
+  attackBtn.addEventListener(
+    "touchstart",
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      unlockAudio();
+      const t = event.changedTouches[0];
+      const rect = attackBtn.getBoundingClientRect();
+      cx = rect.left + rect.width / 2;
+      cy = rect.top + rect.height / 2;
+      active = true;
+      opened = false;
+      selected = null;
+      clearTimeout(openTimer);
+      openTimer = setTimeout(open, 150); // hold to fan out; quick tap stays an attack
+    },
+    { passive: false }
+  );
+  attackBtn.addEventListener(
+    "touchmove",
+    (event) => {
+      event.preventDefault();
+      move(event.changedTouches[0]);
+    },
+    { passive: false }
+  );
+  const end = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    close();
+  };
+  attackBtn.addEventListener("touchend", end, { passive: false });
+  attackBtn.addEventListener("touchcancel", end, { passive: false });
 }
 
 function handleMobileAction(action, pressed, btn) {
@@ -5493,9 +5606,9 @@ function updateHud() {
   }
 }
 
-// Target a constant HORIZONTAL field of view so the character reads the same size in
-// portrait and landscape (otherwise a fixed vertical FOV zooms in on tall screens).
-const BASE_HFOV = 78;
+// Fixed vertical FOV: same framing/character size in portrait and landscape (a derived
+// FOV blew up on tall screens and emptied the view). Landscape just shows a bit more width.
+const ISO_FOV = 52;
 
 function resize() {
   const width = window.innerWidth;
@@ -5503,9 +5616,7 @@ function resize() {
   renderer.setSize(width, height, false);
   if (composer) composer.setSize(width, height);
   camera.aspect = width / height;
-  const hfov = THREE.MathUtils.degToRad(BASE_HFOV);
-  const vfov = 2 * Math.atan(Math.tan(hfov / 2) / camera.aspect);
-  camera.fov = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(vfov), 50, 100);
+  camera.fov = ISO_FOV;
   camera.updateProjectionMatrix();
   resizePreview();
 }
