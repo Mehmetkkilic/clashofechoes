@@ -41,7 +41,19 @@
         <span id="objective-text">Defeat the Swarm</span>
       </section>
 
+      <section id="boss-hud" class="hud boss-hud hidden" aria-label="Boss">
+        <div class="health-row">
+          <strong id="boss-name">☠ Boss</strong>
+          <span id="boss-hp-text"></span>
+        </div>
+        <div class="health-track">
+          <div id="boss-bar" class="health-fill boss-fill"></div>
+        </div>
+      </section>
+
       <button id="settings-btn" class="settings-btn" type="button" aria-label="Settings">⚙</button>
+
+      <canvas id="minimap" class="minimap" width="240" height="240" aria-hidden="true"></canvas>
 
       <section class="hud multiplayer-hud" aria-label="Multiplayer status">
         <strong id="mp-status">MP Offline</strong>
