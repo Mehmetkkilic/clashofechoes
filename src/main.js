@@ -504,7 +504,7 @@ const TPS_DISTANCE = 4.5;
 const TPS_FOCUS_Y = 0.4;
 const TPS_SHOULDER = 0.7;
 // Isometric (ARPG) camera: fixed offset above/behind the player; tune for angle/zoom.
-const ISO_OFFSET = new THREE.Vector3(0, 17, 13);
+const ISO_OFFSET = new THREE.Vector3(0, 12, 9);
 const ISO_FOCUS_Y = 0.6;
 // Screen-relative movement axes (camera is fixed looking down -Z): W=up=-Z, D=right=+X.
 const SCREEN_FWD = new THREE.Vector3(0, 0, -1);
@@ -1099,9 +1099,10 @@ function buildMapDressing(def) {
   const floorKey = def.tiles?.floor ?? "floor";
   const wallKey = def.tiles?.wall ?? "wall";
   tileFloorArea(g.halfX, g.halfZ, 0.05, false, floorKey);
-  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 2, wallKey);
+  // Isometric: single-row (~4u) walls so they don't dwarf the character / occlude the view.
+  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 1, wallKey);
   // Isometric view looks down into the rooms, so no closed ceiling.
-  for (const w of def.walls || []) tileWallSegment(w, 2, wallKey); // interior room walls
+  for (const w of def.walls || []) tileWallSegment(w, 1, wallKey); // interior room walls
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
     placeProp(pr.model, {
