@@ -46,6 +46,15 @@ const botSpawnPoints = [
 
 // Per-map bot bounds + spawn points. The map id is the room name suffix after ":".
 const MAP_BOUNDS = {
+  village: {
+    halfX: 38,
+    halfZ: 38,
+    spawns: [
+      { x: 0, z: -20 }, { x: 20, z: 0 }, { x: -20, z: 0 },
+      { x: 0, z: 20 }, { x: 18, z: -18 }, { x: -18, z: 18 },
+      { x: 24, z: 24 }, { x: -24, z: -24 },
+    ],
+  },
   castle: {
     halfX: 37,
     halfZ: 45,

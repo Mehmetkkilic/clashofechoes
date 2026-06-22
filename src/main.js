@@ -528,6 +528,7 @@ loadingManager.onProgress = (_url, loaded, total) => {
   setLoadingProgress(total > 0 ? loaded / total : 0);
 };
 loadingManager.onLoad = () => revealMainMenu();
+loadingManager.onError = (url) => console.warn("Asset failed to load:", url);
 
 // ---- KayKit CC0 dungeon props (visual dressing only; collision unchanged). ----
 const DUNGEON_MODELS = {
@@ -552,6 +553,19 @@ const DUNGEON_MODELS = {
   ribcage: "/models/halloween/ribcage.gltf",
   coffin: "/models/halloween/coffin.gltf",
   fence: "/models/halloween/fence.gltf",
+  // KayKit Medieval Hexagon (village outdoor props).
+  home_a: "/models/village/building_home_A_blue.gltf",
+  home_b: "/models/village/building_home_B_blue.gltf",
+  market: "/models/village/building_market_blue.gltf",
+  church: "/models/village/building_church_blue.gltf",
+  blacksmith: "/models/village/building_blacksmith_blue.gltf",
+  tree_a: "/models/village/tree_single_A.gltf",
+  tree_b: "/models/village/tree_single_B.gltf",
+  trees: "/models/village/trees_A_medium.gltf",
+  rock: "/models/village/rock_single_A.gltf",
+  vbarrel: "/models/village/barrel.gltf",
+  vcrate: "/models/village/crate_A_big.gltf",
+  flag: "/models/village/flag_red.gltf",
 };
 const dungeonCache = new Map();
 const arenaProps = [];
@@ -582,6 +596,19 @@ const PROP_HEIGHTS = {
   coffin: 0.9,
   fence: 1.2,
   banner: 3.2,
+  // Village (hexagon) props — buildings include a hex base, so heights are generous.
+  home_a: 3.6,
+  home_b: 3.8,
+  market: 3.4,
+  church: 5.2,
+  blacksmith: 3.6,
+  tree_a: 3.2,
+  tree_b: 3.6,
+  trees: 3.2,
+  rock: 1.1,
+  vbarrel: 1.2,
+  vcrate: 1.4,
+  flag: 3.0,
 };
 const MAP_ID = (new URLSearchParams(window.location.search).get("map") || "castle").toLowerCase();
 const MODE = (new URLSearchParams(window.location.search).get("mode") || "pve").toLowerCase() === "pvp" ? "pvp" : "pve";
@@ -610,6 +637,33 @@ function roomWalls(minX, minZ, maxX, maxZ, doors = {}) {
 }
 
 const MAPS = {
+  // Open-air medieval village (KayKit Hexagon) — grassy field, houses, trees, roam freely.
+  village: {
+    ground: { halfX: 40, halfZ: 40, color: 0x6f8f55 },
+    openGround: true, // grass field: no floor/wall tiling
+    spawn: { x: 0, z: 6 },
+    walls: [],
+    pillars: [],
+    props: [
+      { model: "home_a", x: -14, z: -10, rot: 0.4, solid: true, size: 4 },
+      { model: "home_b", x: 10, z: -14, rot: -0.6, solid: true, size: 4 },
+      { model: "market", x: 0, z: -2, rot: 0, solid: true, size: 4 },
+      { model: "church", x: 16, z: 6, rot: -1.2, solid: true, size: 5 },
+      { model: "blacksmith", x: -16, z: 8, rot: 0.9, solid: true, size: 4 },
+      { model: "home_a", x: 22, z: -6, rot: 2.4, solid: true, size: 4 },
+      { model: "home_b", x: -24, z: -4, rot: 1.6, solid: true, size: 4 },
+      { model: "tree_a", x: -8, z: 16 }, { model: "tree_b", x: 8, z: 18 },
+      { model: "trees", x: 26, z: 18 }, { model: "trees", x: -28, z: 16 },
+      { model: "tree_a", x: 30, z: -18 }, { model: "tree_b", x: -30, z: -16 },
+      { model: "rock", x: 4, z: 24 }, { model: "rock", x: -18, z: 22 },
+      { model: "vbarrel", x: -2, z: 4, solid: true }, { model: "vcrate", x: 3, z: 5, solid: true },
+      { model: "flag", x: 0, z: 10 },
+      { model: "tree_a", x: 18, z: 24 }, { model: "trees", x: -12, z: 28 },
+    ],
+    torches: [
+      { x: -2, z: 8, y: 4 }, { x: 14, z: 2, y: 4 }, { x: -14, z: 4, y: 4 },
+    ],
+  },
   // Castle Drakenhall — 13-room floor-plan (3x4 grid + gatehouse), centered doors.
   castle: {
     ground: { halfX: 39, halfZ: 47, color: 0x2a2622 },
@@ -1051,7 +1105,10 @@ function buildMapCollision(def) {
   for (const w of def.walls || []) addWallSegmentCollider(w);
   for (const p of def.pillars || []) addCircleCollider(p.x, p.z, p.r ?? 1.2, 0, p.h ?? 8);
   for (const pr of def.props || []) {
-    if (pr.solid) addBoxCollider(pr.x, pr.z, 1.4, 1.4, 0, 1.4);
+    if (pr.solid) {
+      const s = pr.size ?? 1.4; // buildings can pass a bigger collider footprint
+      addBoxCollider(pr.x, pr.z, s, s, 0, 2);
+    }
   }
   for (const t of def.torches || []) createTorch(t.x, t.y ?? 4, t.z);
 }
@@ -1103,11 +1160,13 @@ function buildMapDressing(def) {
   const g = def.ground;
   const floorKey = def.tiles?.floor ?? "floor";
   const wallKey = def.tiles?.wall ?? "wall";
-  tileFloorArea(g.halfX, g.halfZ, 0.05, false, floorKey);
-  // Isometric: single-row (~4u) walls so they don't dwarf the character / occlude the view.
-  tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 1, wallKey);
-  // Isometric view looks down into the rooms, so no closed ceiling.
-  for (const w of def.walls || []) tileWallSegment(w, 1, wallKey); // interior room walls
+  if (!def.openGround) {
+    tileFloorArea(g.halfX, g.halfZ, 0.05, false, floorKey);
+    // Isometric: single-row (~4u) walls so they don't dwarf the character / occlude the view.
+    tileWallsRect(-g.halfX, g.halfX, -g.halfZ, g.halfZ, 1, wallKey);
+    // Isometric view looks down into the rooms, so no closed ceiling.
+    for (const w of def.walls || []) tileWallSegment(w, 1, wallKey); // interior room walls
+  }
   for (const p of def.pillars || []) placeProp("column", { x: p.x, z: p.z, targetH: p.h ?? 8 });
   for (const pr of def.props || []) {
     placeProp(pr.model, {
@@ -1129,15 +1188,25 @@ function buildMapDressing(def) {
 }
 
 function loadCharacterModels() {
+  // The menu/hero-preview only needs the character models, so reveal it as soon as
+  // those are ready (success or error) instead of waiting on every decoration asset.
+  let remaining = Object.keys(CHARACTER_MODELS).length;
+  const done = () => {
+    if (--remaining <= 0) revealMainMenu();
+  };
   for (const [key, url] of Object.entries(CHARACTER_MODELS)) {
     gltfLoader.load(
       url,
       (gltf) => {
         modelCache.set(key, gltf);
         if (previewActive && key === player.classId && !previewModel) setPreviewClass(key);
+        done();
       },
       undefined,
-      (err) => console.warn("Character model failed to load:", key, err)
+      (err) => {
+        console.warn("Character model failed to load:", key, err);
+        done();
+      }
     );
   }
 }
@@ -1234,6 +1303,11 @@ function init() {
   setupPostProcessing();
   loadCharacterModels();
   loadLightingPrefs();
+  // The village is an open-air daytime scene by default (unless the player set a preference).
+  if (MAP_ID === "village" && !localStorage.getItem("vc-light")) {
+    lightingState.mode = "day";
+    lightingState.level = 1;
+  }
   applyLightingSettings();
   if (customMap) buildMapCollision(MAPS[MAP_ID]);
   else setupArena();
@@ -3769,9 +3843,18 @@ function setLoadingProgress(frac) {
 function revealMainMenu() {
   if (mainMenuShown) return;
   mainMenuShown = true;
-  setLoadingProgress(1);
-  ui.loadingScreen?.classList.add("hidden");
-  ui.mainMenu?.classList.remove("hidden");
+  try {
+    setLoadingProgress(1);
+    // Fade the loading screen out, then swap to the main menu with a fade-in.
+    ui.loadingScreen?.classList.add("fade-out");
+    ui.mainMenu?.classList.remove("hidden");
+    ui.mainMenu?.classList.add("fade-in");
+    setTimeout(() => ui.loadingScreen?.classList.add("hidden"), 420);
+  } catch (err) {
+    console.warn("revealMainMenu failed:", err);
+    ui.loadingScreen?.classList.add("hidden");
+    ui.mainMenu?.classList.remove("hidden");
+  }
 }
 
 function showHeroSelect() {
@@ -3823,7 +3906,7 @@ function setupMenus() {
   ui.settingsClose?.addEventListener("click", closeSettings);
 
   // Safety: if asset loading stalls, reveal the menu anyway.
-  setTimeout(revealMainMenu, 12000);
+  setTimeout(revealMainMenu, 5000);
 }
 
 let settingsOpen = false;

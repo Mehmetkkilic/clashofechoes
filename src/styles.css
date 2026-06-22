@@ -1281,6 +1281,55 @@ body.playing .settings-btn {
   display: none;
 }
 
+/* Loading -> menu fade. */
+.menu-screen.fade-out {
+  animation: menu-fade-out 0.42s ease forwards;
+}
+
+.menu-screen.fade-in {
+  animation: menu-fade-in 0.45s ease;
+}
+
+@keyframes menu-fade-out {
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+
+@keyframes menu-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -54%) scale(0.97);
+  }
+}
+
+.loading-mark {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--accent);
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+
+.loading-tagline {
+  margin-top: -6px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+@keyframes loading-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
 .menu-title {
   font-size: 26px;
   font-weight: 900;
