@@ -1194,7 +1194,8 @@ body.touch.playing .mobile-actions {
   font-size: 15px;
 }
 
-.menu-maps {
+.menu-maps,
+.menu-modes {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
   gap: 8px;

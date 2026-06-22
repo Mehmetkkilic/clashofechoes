@@ -38,7 +38,7 @@
 
       <section class="hud objective-hud" aria-label="Objective">
         <span class="objective-icon">☣</span>
-        <span>Defeat the Swarm</span>
+        <span id="objective-text">Defeat the Swarm</span>
       </section>
 
       <section class="hud lighting-hud" aria-label="Lighting controls">
@@ -190,6 +190,10 @@
       <section id="main-menu" class="menu-screen hidden" aria-label="Main menu">
         <strong class="menu-title">Vermincull</strong>
         <span class="menu-sub">Low-poly hero arena</span>
+        <div class="menu-modes" role="group" aria-label="Mode">
+          <button class="map-button mode-button" type="button" data-mode="pve">PvE · Swarm</button>
+          <button class="map-button mode-button" type="button" data-mode="pvp">PvP · Heroes</button>
+        </div>
         <div class="menu-maps" role="group" aria-label="Map">
           <button class="map-button" type="button" data-map="castle">Castle</button>
           <button class="map-button" type="button" data-map="dungeon">Dungeon</button>
