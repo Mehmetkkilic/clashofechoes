@@ -514,7 +514,7 @@ function updateBot(room, bot, targets, now, dt) {
   if (bot.dead) {
     bot.respawn -= dt;
     if (bot.respawn <= 0) {
-      respawnBot(bot);
+      respawnBot(bot, targets);
       broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
     }
     return;
@@ -628,7 +628,7 @@ function damageBot(room, bot, attackerId, hit) {
   if (bot.hp <= 0) {
     bot.dead = true;
     recordKill(room, attackerId, bot.id, hit.label || "Defeated");
-    bot.respawn = 2.1;
+    bot.respawn = 5.0;
     broadcast(room.name, { type: "peer-state", id: bot.id, state: botState(bot) });
     broadcast(room.name, {
       type: "peer-death",
@@ -659,15 +659,33 @@ function applyBotKnockback(bot, attackerId, knock) {
   clampBotPosition(bot);
 }
 
-function respawnBot(bot) {
+function respawnBot(bot, targets = []) {
   const spawns = bot.spawns || botSpawnPoints;
-  const spawn = spawns[bot.slot % spawns.length];
+  // Respawn at the spawn point farthest from living players so it doesn't pop back
+  // on top of whoever just killed it.
+  const players = targets.map((t) => t.state?.position).filter(Boolean);
+  let spawn = spawns[bot.slot % spawns.length];
+  if (players.length) {
+    let bestScore = -Infinity;
+    for (const candidate of spawns) {
+      let nearest = Infinity;
+      for (const p of players) {
+        nearest = Math.min(nearest, Math.hypot(candidate.x - p.x, candidate.z - p.z));
+      }
+      if (nearest > bestScore) {
+        bestScore = nearest;
+        spawn = candidate;
+      }
+    }
+  }
   const stats = classStats[bot.classId] || classStats.fighter;
   bot.position.x = spawn.x + (Math.random() - 0.5) * 5;
   bot.position.y = 1.72;
   bot.position.z = spawn.z + (Math.random() - 0.5) * 5;
+  bot.home = { x: spawn.x, z: spawn.z };
   bot.hp = bot.maxHp || stats.hp;
   bot.dead = false;
+  bot.aggroUntil = 0;
   bot.attackCd = 0.85 + Math.random() * 0.8;
   bot.wander = randomFlatDirection();
   bot.nextWander = 0.8 + Math.random() * 1.8;

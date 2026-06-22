@@ -98,6 +98,9 @@ const ui = {
   menuLeaderboard: document.querySelector("#menu-leaderboard"),
   lbBack: document.querySelector("#lb-back"),
   heroBack: document.querySelector("#hero-back"),
+  settingsBtn: document.querySelector("#settings-btn"),
+  settingsPanel: document.querySelector("#settings-panel"),
+  settingsClose: document.querySelector("#settings-close"),
 };
 
 const CLASS_DATA = {
@@ -1190,6 +1193,7 @@ function init() {
   if (!customMap) setupLights();
   setupPostProcessing();
   loadCharacterModels();
+  loadLightingPrefs();
   applyLightingSettings();
   if (customMap) buildMapCollision(MAPS[MAP_ID]);
   else setupArena();
@@ -2353,11 +2357,33 @@ function setLightingMode(mode) {
   lightingState.level = mode === "day" ? 1 : 0.62;
   ui.lightLevel.value = String(Math.round(lightingState.level * 100));
   applyLightingSettings();
+  saveLightingPrefs();
 }
 
 function setLightingLevel(level) {
   lightingState.level = clamp(level, 0.35, 1.2);
   applyLightingSettings();
+  saveLightingPrefs();
+}
+
+function saveLightingPrefs() {
+  try {
+    localStorage.setItem("vc-light", JSON.stringify({ mode: lightingState.mode, level: lightingState.level }));
+  } catch (err) {
+    /* ignore storage errors */
+  }
+}
+
+function loadLightingPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("vc-light") || "null");
+    if (!saved) return;
+    if (lightingPresets[saved.mode]) lightingState.mode = saved.mode;
+    if (typeof saved.level === "number") lightingState.level = clamp(saved.level, 0.35, 1.2);
+    if (ui.lightLevel) ui.lightLevel.value = String(Math.round(lightingState.level * 100));
+  } catch (err) {
+    /* ignore storage errors */
+  }
 }
 
 function applyLightingSettings() {
@@ -3135,8 +3161,8 @@ function bindEvents() {
   document.addEventListener("pointerlockchange", () => {
     const locked = document.pointerLockElement === canvas;
     controlsLocked = locked;
-    ui.lockPanel.classList.toggle("hidden", locked);
-    document.body.classList.toggle("playing", locked);
+    ui.lockPanel.classList.toggle("hidden", locked || settingsOpen);
+    document.body.classList.toggle("playing", locked || settingsOpen);
     if (locked) stopPreview();
     if (locked && !matchStarted) {
       matchStarted = true;
@@ -3637,8 +3663,30 @@ function setupMenus() {
   ui.menuLeaderboard?.addEventListener("click", showLeaderboard);
   ui.lbBack?.addEventListener("click", showMainMenu);
   ui.heroBack?.addEventListener("click", showMainMenu);
+
+  ui.settingsBtn?.addEventListener("click", openSettings);
+  ui.settingsClose?.addEventListener("click", closeSettings);
+
   // Safety: if asset loading stalls, reveal the menu anyway.
   setTimeout(revealMainMenu, 12000);
+}
+
+let settingsOpen = false;
+
+function openSettings() {
+  if (!ui.settingsPanel) return;
+  settingsOpen = true;
+  ui.settingsPanel.classList.remove("hidden");
+  // Desktop: release the mouse so the panel is clickable (guarded so the hero
+  // lock-panel doesn't pop up while settings is open).
+  if (!isTouch && document.pointerLockElement) document.exitPointerLock();
+}
+
+function closeSettings() {
+  settingsOpen = false;
+  ui.settingsPanel?.classList.add("hidden");
+  // Desktop: resume the game by re-locking the pointer.
+  if (!isTouch && matchStarted) requestArenaPointerLock();
 }
 
 function tick() {
@@ -5014,7 +5062,8 @@ function spawnHitBurst(position, color) {
 
 // PvE loot: a killed skeleton drops a glowing potion orb (mana, or sometimes health).
 function spawnPotion(position) {
-  const isHeal = Math.random() < 0.3;
+  // Classes without mana (fighter) only get health potions — mana orbs would be useless.
+  const isHeal = !classUsesMana(player.classId) || Math.random() < 0.3;
   const color = isHeal ? 0x6bd391 : 0x5aa0ff;
   const orb = new THREE.Mesh(
     new THREE.IcosahedronGeometry(0.34, 0),

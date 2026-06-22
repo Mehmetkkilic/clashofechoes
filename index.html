@@ -41,17 +41,7 @@
         <span id="objective-text">Defeat the Swarm</span>
       </section>
 
-      <section class="hud lighting-hud" aria-label="Lighting controls">
-        <div class="lighting-toggle" role="group" aria-label="Time of day">
-          <button class="lighting-button" data-light-mode="day" type="button">Day</button>
-          <button class="lighting-button active" data-light-mode="night" type="button">Night</button>
-        </div>
-        <label class="lighting-slider">
-          <span>Light</span>
-          <input id="light-level" type="range" min="35" max="120" value="62" />
-          <strong id="light-level-text">62%</strong>
-        </label>
-      </section>
+      <button id="settings-btn" class="settings-btn" type="button" aria-label="Settings">⚙</button>
 
       <section class="hud multiplayer-hud" aria-label="Multiplayer status">
         <strong id="mp-status">MP Offline</strong>
@@ -148,23 +138,27 @@
       </div>
 
       <div id="mobile-actions" class="mobile-actions" aria-hidden="true">
+        <button class="mobile-btn jump jump-left" data-action="jump" type="button">⤒</button>
         <div class="action-cluster">
-          <button class="mobile-btn ab" data-action="q" data-slot="q" type="button">
-            <span class="mb-label">Q</span><span class="mb-cd"></span>
-          </button>
-          <button class="mobile-btn ab" data-action="e" data-slot="e" type="button">
-            <span class="mb-label">E</span><span class="mb-cd"></span>
-          </button>
-          <button class="mobile-btn ab" data-action="r" data-slot="r" type="button">
-            <span class="mb-label">R</span><span class="mb-cd"></span>
-          </button>
-          <button class="mobile-btn special" data-action="secondary" data-slot="secondary" type="button">
-            <span class="mb-label">⛨</span><span class="mb-cd"></span>
-          </button>
-          <button class="mobile-btn jump" data-action="jump" type="button">⤒</button>
-          <button class="mobile-btn attack" data-action="primary" data-slot="primary" type="button">
-            <span class="mb-label">⚔</span><span class="mb-cd"></span>
-          </button>
+          <div class="ab-row">
+            <button class="mobile-btn ab" data-action="q" data-slot="q" type="button">
+              <span class="mb-label">Q</span><span class="mb-cd"></span>
+            </button>
+            <button class="mobile-btn ab" data-action="e" data-slot="e" type="button">
+              <span class="mb-label">E</span><span class="mb-cd"></span>
+            </button>
+            <button class="mobile-btn ab" data-action="r" data-slot="r" type="button">
+              <span class="mb-label">R</span><span class="mb-cd"></span>
+            </button>
+          </div>
+          <div class="main-row">
+            <button class="mobile-btn special" data-action="secondary" data-slot="secondary" type="button">
+              <span class="mb-label">⛨</span><span class="mb-cd"></span>
+            </button>
+            <button class="mobile-btn attack" data-action="primary" data-slot="primary" type="button">
+              <span class="mb-label">⚔</span><span class="mb-cd"></span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -196,6 +190,23 @@
           <span class="menu-sub">Skor tablosu yakında — backend ile gelecek.</span>
         </div>
         <button id="lb-back" class="menu-button menu-button--ghost" type="button">Geri</button>
+      </section>
+
+      <section id="settings-panel" class="menu-screen settings-panel hidden" aria-label="Settings">
+        <strong class="menu-title">Ayarlar</strong>
+        <div class="settings-row">
+          <span class="settings-label">Zaman</span>
+          <div class="lighting-toggle" role="group" aria-label="Time of day">
+            <button class="lighting-button" data-light-mode="day" type="button">Day</button>
+            <button class="lighting-button active" data-light-mode="night" type="button">Night</button>
+          </div>
+        </div>
+        <label class="lighting-slider">
+          <span>Işık</span>
+          <input id="light-level" type="range" min="35" max="120" value="62" />
+          <strong id="light-level-text">62%</strong>
+        </label>
+        <button id="settings-close" class="menu-button" type="button">Kapat</button>
       </section>
 
       <section id="lock-panel" class="lock-panel hidden" aria-label="Choose your hero">
