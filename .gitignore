@@ -3,3 +3,6 @@ dist/
 screenshots/
 release/
 .DS_Store
+
+# Meshy AI calisma klasoru (API key iceren scriptler - ASLA commit etme)
+.meshy_work/

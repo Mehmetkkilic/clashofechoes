@@ -492,17 +492,23 @@ const CHARACTER_MODELS = {
   fighter: "/models/kaykit/Knight.glb",
   priest: "/models/kaykit/Mage.glb",
   ranger: "/models/kaykit/Rogue.glb",
-  witch: "/models/kaykit/Rogue_Hooded.glb",
+  witch: "/models/meshy/Rogue_Plague.glb",
   skeleton: "/models/kaykit/Skeleton_Warrior.glb",
 };
 const ATTACK_CLIP = {
   fighter: "1H_Melee_Attack_Chop",
   priest: "Spellcast_Shoot",
   ranger: "1H_Ranged_Shoot",
-  witch: "Spellcast_Shoot",
+  witch: "Attack",
   skeleton: "1H_Melee_Attack_Chop",
 };
 const MODEL_TARGET_HEIGHT = 1.85;
+// Per-model scale fine-tune applied ON TOP of MODEL_TARGET_HEIGHT. Skinned-mesh
+// bind-pose bounds are unreliable, so AI-generated models can come out oversized.
+// Only listed keys are adjusted; everything else stays at 1.0 (KayKit untouched).
+const MODEL_SCALE = {
+  // e.g. witch: 0.9 — trim a specific model if it still reads too tall/short.
+};
 const MODEL_FACING_YAW = Math.PI; // tune if characters face the wrong way
 const CHARACTER_FOOT_LIFT = 0.05; // small lift onto the floor tiles (origin = feet)
 const TPS_DISTANCE = 4.5;
@@ -1229,9 +1235,15 @@ function makeCharInstance(key) {
   const gltf = modelCache.get(key);
   if (!gltf) return null;
   const root = cloneSkeleton(gltf.scene);
-  const box = new THREE.Box3().setFromObject(root);
+  // precise=true applies bone transforms, so rigs authored with a scaled armature
+  // (e.g. Meshy/Mixamo's 0.01 armature + 100x inverse-bind matrices) measure at their
+  // true rendered height instead of the raw bind-pose bounds — without this such imports
+  // come out ~100x too large. KayKit's scale-1 rigs measure the same either way.
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root, true);
   const size = box.getSize(new THREE.Vector3());
-  const scale = size.y > 0.001 ? MODEL_TARGET_HEIGHT / size.y : 1;
+  const baseScale = size.y > 0.001 ? MODEL_TARGET_HEIGHT / size.y : 1;
+  const scale = baseScale * (MODEL_SCALE[key] || 1);
   root.scale.setScalar(scale);
   // KayKit's armature root sits at the feet, so trust the origin. Box3.setFromObject is
   // unreliable for skinned meshes (bind-pose bounds), which caused the sinking.
@@ -1305,8 +1317,6 @@ function updateChar(char, dt, moving) {
   }
   char.mixer.update(dt);
 }
-
-init();
 
 function init() {
   const customMap = !!MAPS[MAP_ID];
@@ -3825,11 +3835,19 @@ function setPreviewClass(classId) {
   const gltf = modelCache.get(classId);
   if (!gltf) return; // retried once models finish loading
   const root = cloneSkeleton(gltf.scene);
-  const box = new THREE.Box3().setFromObject(root);
+  // precise=true so scaled-armature rigs (Meshy/Mixamo) measure their true rendered
+  // height — matches makeCharInstance and stops the giant zoomed-in preview blob.
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root, true);
   const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
   const scale = size.y > 0.001 ? 1.9 / size.y : 1;
   root.scale.setScalar(scale);
-  root.position.y = 0; // KayKit origin is at the feet
+  // Auto-frame from the real bounds: drop the model's feet (box bottom) to y=0 and
+  // centre it on x/z, regardless of where the source authored the origin
+  // (KayKit = feet & centred, Meshy/AI models = geometric centre). Without this the
+  // preview camera framed an off-origin model as a giant zoomed-in blob.
+  root.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
   root.traverse((o) => {
     if (o.isMesh) o.frustumCulled = false;
   });
@@ -5812,3 +5830,9 @@ function resize() {
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
+
+// Kick off after the entire module has evaluated, so every module-level
+// const/let (ISO_FOV, charsReady, settingsOpen, …) is initialized first.
+// Previously `init()` ran near the top and hit a TDZ via resize()→ISO_FOV,
+// which froze the loading screen.
+init();
