@@ -3262,6 +3262,12 @@ function classColor(classId) {
 
 function bindEvents() {
   window.addEventListener("resize", resize);
+  window.addEventListener("orientationchange", () => setTimeout(resize, 60));
+  // ResizeObserver fires on the initial layout pass too, fixing the first-paint black frame on mobile.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => resize()).observe(canvas);
+  }
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
   window.addEventListener("pointerdown", unlockAudio, { capture: true });
 
   canvas.addEventListener("click", () => {
@@ -3767,9 +3773,9 @@ function setupPostProcessing() {
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(
     new THREE.Vector2(window.innerWidth, window.innerHeight),
-    0.34, // strength — subtle glow, not blown out
-    0.5, // radius
-    0.82 // threshold — only torches / emissive surfaces bloom
+    0.46, // strength — let attack beams/flashes glow
+    0.6, // radius
+    0.72 // threshold — bright additive FX bloom; torches stay controlled
   );
   composer.addPass(bloom);
 }
@@ -3952,6 +3958,8 @@ function closeSettings() {
 
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
+  // Safety net: if the viewport settled to a new size (mobile load/URL-bar), re-fit.
+  if (canvas.clientWidth !== lastViewW || canvas.clientHeight !== lastViewH) resize();
   update(dt);
   if (composer) composer.render();
   else renderer.render(scene, camera);
@@ -4509,6 +4517,7 @@ function usePrimary() {
     playSound("slash");
     sendMultiplayerAttack("primary", "Slash", 0xe0a34f);
     swingWeapon(0.38);
+    spawnBeam(getAimDirection(), 3.6, 0xffe0a0, 1.5, 0.16); // bright slash arc
     meleeCone({
       range: 3.2,
       angle: 0.68,
@@ -4532,6 +4541,7 @@ function usePrimary() {
       shape: "sphere",
       extra: { burn: 1.4 },
     });
+    spawnBeam(getAimDirection(), 5, 0xffb070, 0.45, 0.14); // cast muzzle ray
   } else if (classId === "ranger") {
     cooldowns.primary = 0.55;
     playSound("arrow");
@@ -4545,6 +4555,7 @@ function usePrimary() {
       gravity: 0,
       shape: "arrow",
     });
+    spawnBeam(getAimDirection(), 6, 0xc9f0a0, 0.32, 0.12); // arrow streak
   } else {
     cooldowns.primary = 0.62;
     playSound("witch");
@@ -4559,6 +4570,7 @@ function usePrimary() {
       shape: "wave",
       extra: { knock: 5 },
     });
+    spawnBeam(getAimDirection(), 5, 0xd8a0ff, 0.5, 0.14); // sonic ray
   }
 }
 
@@ -5125,11 +5137,55 @@ function makeGlowSphere(color, r) {
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
   );
+}
+
+// A bright additive light beam/streak from the player along the aim direction (blooms).
+function spawnBeam(dir, length, color, width = 0.5, life = 0.18) {
+  const beam = new THREE.Mesh(
+    new THREE.BoxGeometry(width, 0.06, length), // length along local +Z
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+  );
+  const flat = new THREE.Vector3(dir.x, 0, dir.z).normalize();
+  const mid = player.position.clone().addScaledVector(flat, length * 0.5);
+  beam.position.set(mid.x, 0.55, mid.z);
+  beam.lookAt(mid.x + flat.x, 0.55, mid.z + flat.z); // aim local +Z along the flat direction
+  scene.add(beam);
+  effects.push({
+    mesh: beam,
+    life,
+    maxLife: life,
+    update(effect, progress) {
+      effect.mesh.material.opacity = Math.max(0, 0.95 * (1 - progress));
+      effect.mesh.scale.x = 1 + progress * 1.5; // widen as it fades
+    },
+  });
+  spawnCastFlash(color);
+}
+
+// Brief point-light pop at the player on a cast/swing.
+function spawnCastFlash(color) {
+  const light = new THREE.PointLight(color, 6, 9, 2);
+  light.position.set(player.position.x, player.position.y - 0.4, player.position.z);
+  scene.add(light);
+  effects.push({
+    mesh: light,
+    life: 0.18,
+    maxLife: 0.18,
+    update(effect, progress) {
+      effect.mesh.intensity = 6 * (1 - progress);
+    },
+  });
 }
 
 function createProjectileMesh(shape, color, radius) {
@@ -5144,9 +5200,11 @@ function createProjectileMesh(shape, color, radius) {
   }
 
   if (shape === "wave") {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.035, 6, 18), material);
+    const group = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.05, 6, 18), material);
     ring.scale.z = 0.22;
-    return ring;
+    group.add(ring, makeGlowSphere(color, radius * 1.3));
+    return group;
   }
 
   if (shape === "ice") {
@@ -5370,20 +5428,38 @@ function spawnHitBurst(position, color) {
     },
   });
 
-  // White impact flash core.
+  // Bright additive impact flash core (blooms).
   const flash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, depthWrite: false })
+    new THREE.SphereGeometry(0.42, 12, 10),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
   );
   flash.position.copy(position);
   scene.add(flash);
   effects.push({
     mesh: flash,
-    life: 0.14,
-    maxLife: 0.14,
+    life: 0.16,
+    maxLife: 0.16,
     update(effect, progress) {
-      effect.mesh.scale.setScalar(1 + progress * 1.8);
-      effect.mesh.material.opacity = Math.max(0, 0.85 * (1 - progress));
+      effect.mesh.scale.setScalar(1 + progress * 2.2);
+      effect.mesh.material.opacity = Math.max(0, 1 * (1 - progress));
+    },
+  });
+  // Brief light pop at the impact.
+  const hitLight = new THREE.PointLight(color, 4, 7, 2);
+  hitLight.position.copy(position);
+  scene.add(hitLight);
+  effects.push({
+    mesh: hitLight,
+    life: 0.16,
+    maxLife: 0.16,
+    update(effect, progress) {
+      effect.mesh.intensity = 4 * (1 - progress);
     },
   });
 
@@ -5715,9 +5791,16 @@ function updateHud() {
 // FOV blew up on tall screens and emptied the view). Landscape just shows a bit more width.
 const ISO_FOV = 52;
 
+let lastViewW = 0;
+let lastViewH = 0;
+
 function resize() {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  // Use the canvas's actual laid-out size (reflects mobile Safari settling) with a window fallback.
+  const width = canvas.clientWidth || window.innerWidth;
+  const height = canvas.clientHeight || window.innerHeight;
+  if (width < 1 || height < 1) return;
+  lastViewW = width;
+  lastViewH = height;
   renderer.setSize(width, height, false);
   if (composer) composer.setSize(width, height);
   camera.aspect = width / height;
