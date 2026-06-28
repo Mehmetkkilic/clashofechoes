@@ -6,3 +6,4 @@ release/
 
 # Meshy AI calisma klasoru (API key iceren scriptler - ASLA commit etme)
 .meshy_work/
+.audio_work/

@@ -226,6 +226,12 @@ const AUDIO_SAMPLES = {
   "charge-arrow": { src: "/audio/magical-whoosh.m4a", gain: 0.44, maxDuration: 0.9 },
   ice: { src: "/audio/magical-whoosh.m4a", gain: 0.38, playbackRate: 1.18, maxDuration: 0.9 },
   witch: { src: "/audio/sonic-disruptor.m4a", gain: 0.42, maxDuration: 1.35 },
+  // Witch ability-specific SFX (ElevenLabs). Each spell now has its own voice.
+  "witch-soundwave": { src: "/audio/witch-soundwave.m4a", gain: 0.46, maxDuration: 1.3 },
+  "witch-scream": { src: "/audio/witch-scream.m4a", gain: 0.44, maxDuration: 1.2 },
+  "witch-silence": { src: "/audio/witch-silence.m4a", gain: 0.4, maxDuration: 1.1 },
+  "witch-fear": { src: "/audio/witch-fear.m4a", gain: 0.42, maxDuration: 1.5 },
+  "witch-banshee": { src: "/audio/witch-banshee.m4a", gain: 0.5, maxDuration: 2.6 },
   dash: { src: "/audio/magical-whoosh.m4a", gain: 0.44, playbackRate: 0.92, maxDuration: 0.8 },
   trap: { src: "/audio/trap.m4a", gain: 0.5, maxDuration: 1.0 },
   wall: { src: "/audio/magical-whoosh.m4a", gain: 0.42, playbackRate: 0.8, maxDuration: 1.0 },
@@ -2202,8 +2208,13 @@ function soundForAttack(label = "") {
   if (label.includes("Charge") || label.includes("Roll")) return "dash";
   if (label.includes("Trap")) return "trap";
   if (label.includes("Wall")) return "wall";
-  if (label.includes("Whirlwind") || label.includes("Rain") || label.includes("Banshee")) return "ultimate";
-  if (label.includes("Silence") || label.includes("Fear") || label.includes("Scream") || label.includes("Wave")) return "witch";
+  // Banshee must be checked before generic "Scream" since the label is "Banshee Scream".
+  if (label.includes("Banshee")) return "witch-banshee";
+  if (label.includes("Whirlwind") || label.includes("Rain")) return "ultimate";
+  if (label.includes("Silence")) return "witch-silence";
+  if (label.includes("Fear")) return "witch-fear";
+  if (label.includes("Scream")) return "witch-scream";
+  if (label.includes("Wave")) return "witch-soundwave";
   return "zone";
 }
 
@@ -4576,7 +4587,7 @@ function usePrimary() {
     spawnBeam(getAimDirection(), 6, 0xc9f0a0, 0.32, 0.12); // arrow streak
   } else {
     cooldowns.primary = 0.62;
-    playSound("witch");
+    playSound("witch-soundwave");
     sendMultiplayerAttack("primary", "Sound Wave", 0xb77ce8);
     spawnProjectile({
       label: "Sound Wave",
@@ -4630,7 +4641,7 @@ function useSecondaryDown() {
     });
   } else if (player.classId === "witch") {
     cooldowns.secondary = 1.2;
-    playSound("witch");
+    playSound("witch-scream");
     sendMultiplayerAttack("secondary", "Scream", 0xb77ce8);
     meleeCone({
       range: 8.5,
@@ -4850,7 +4861,7 @@ function useRangerAbility(slot) {
 function useWitchAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.4;
-    playSound("zone");
+    playSound("witch-silence");
     const point = getAimGroundPoint(13);
     sendMultiplayerAttack("q", "Silence", 0xb77ce8, { target: point });
     const mesh = makeGroundRing(point, 4.6, 0xb77ce8, 3.5, true);
@@ -4876,7 +4887,7 @@ function useWitchAbility(slot) {
 
   if (slot === "e") {
     cooldowns.e = 7.2;
-    playSound("witch");
+    playSound("witch-fear");
     sendMultiplayerAttack("e", "Fear", 0xb77ce8);
     damageArea(player.position, 7.4, 18, "Fear", 0xb77ce8, { fear: 2.2, knock: 7 });
     makeGroundRing(player.position, 7.4, 0xb77ce8, 0.7);
@@ -4884,7 +4895,7 @@ function useWitchAbility(slot) {
 
   if (slot === "r") {
     cooldowns.r = 24;
-    playSound("ultimate");
+    playSound("witch-banshee");
     sendMultiplayerAttack("r", "Banshee Scream", 0xb77ce8);
     meleeCone({
       range: 15,
