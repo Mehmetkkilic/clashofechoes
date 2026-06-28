@@ -224,9 +224,16 @@ const AUDIO_SAMPLES = {
   ready: { src: "/audio/ui-ready.m4a", gain: 0.44, maxDuration: 0.7 },
   class: { src: "/audio/ui-select.m4a", gain: 0.4, maxDuration: 0.6 },
   slash: { src: "/audio/melee-swing.m4a", gain: 0.58 },
-  hit: { src: "/audio/sword-hit.m4a", gain: 0.56 },
+  hit: { src: "/audio/hit.m4a", gain: 0.54, maxDuration: 0.45 },
   bash: { src: "/audio/sword-hit.m4a", gain: 0.72 },
-  block: { src: "/audio/sword-hit.m4a", gain: 0.48 },
+  block: { src: "/audio/block.m4a", gain: 0.5, maxDuration: 0.45 },
+  // Movement + combat SFX (ElevenLabs). Footstep gets extra pitch variance.
+  step: { src: "/audio/step.m4a", gain: 0.3, maxDuration: 0.22, pitchVar: 0.16 },
+  jump: { src: "/audio/jump.m4a", gain: 0.32, maxDuration: 0.4 },
+  land: { src: "/audio/land.m4a", gain: 0.36, maxDuration: 0.4 },
+  hurt: { src: "/audio/hurt.m4a", gain: 0.46, maxDuration: 0.55 },
+  kill: { src: "/audio/kill.m4a", gain: 0.46, maxDuration: 0.7 },
+  death: { src: "/audio/death.m4a", gain: 0.5, maxDuration: 1.0 },
   fire: { src: "/audio/fireball.m4a", gain: 0.46, maxDuration: 1.7 },
   meteor: { src: "/audio/fireball.m4a", gain: 0.58, maxDuration: 1.9 },
   arrow: { src: "/audio/arrow-whoosh.m4a", gain: 0.52 },
@@ -1676,7 +1683,7 @@ function playSample(name, intensity = 1) {
   const source = audioState.ctx.createBufferSource();
   const gain = audioState.ctx.createGain();
   const start = audioState.ctx.currentTime;
-  const jitter = 1 + (Math.random() - 0.5) * 0.05;
+  const jitter = 1 + (Math.random() - 0.5) * (settings.pitchVar ?? 0.05);
 
   source.buffer = buffer;
   source.playbackRate.value = (settings.playbackRate ?? 1) * jitter;
@@ -4133,6 +4140,7 @@ function updatePlayer(dt) {
 
   if (input.jump && grounded) {
     player.velocity.y = 6.2;
+    playSound("jump");
   }
   input.jump = false;
 
@@ -4141,6 +4149,7 @@ function updatePlayer(dt) {
 }
 
 function movePlayerWithCollision(dt, startFootY, grounded) {
+  const fallSpeed = player.velocity.y; // captured before the landing snap zeroes it
   const dx = player.velocity.x * dt;
   const dz = player.velocity.z * dt;
 
@@ -4169,6 +4178,7 @@ function movePlayerWithCollision(dt, startFootY, grounded) {
   const fallingOntoSurface = player.velocity.y <= 0 && startFootY >= groundY - 0.05;
 
   if ((canSnapUp && player.velocity.y <= 0) || (fallingOntoSurface && footY <= groundY)) {
+    if (!grounded && fallSpeed < -4) playSound("land"); // only a real fall, not a walk-step
     footY = groundY;
     player.velocity.y = 0;
   }
