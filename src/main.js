@@ -216,6 +216,13 @@ const audioState = {
 
 const AUDIO_SAMPLES = {
   ambience: { src: "/audio/ambience-castle.m4a", gain: 0.11 },
+  // UI / menu SFX (ElevenLabs).
+  click: { src: "/audio/ui-click.m4a", gain: 0.4, maxDuration: 0.3 },
+  hover: { src: "/audio/ui-hover.m4a", gain: 0.18, maxDuration: 0.22 },
+  select: { src: "/audio/ui-select.m4a", gain: 0.42, maxDuration: 0.6 },
+  back: { src: "/audio/ui-back.m4a", gain: 0.34, maxDuration: 0.4 },
+  ready: { src: "/audio/ui-ready.m4a", gain: 0.44, maxDuration: 0.7 },
+  class: { src: "/audio/ui-select.m4a", gain: 0.4, maxDuration: 0.6 },
   slash: { src: "/audio/melee-swing.m4a", gain: 0.58 },
   hit: { src: "/audio/sword-hit.m4a", gain: 0.56 },
   bash: { src: "/audio/sword-hit.m4a", gain: 0.72 },
@@ -3962,8 +3969,45 @@ function setupMenus() {
   ui.settingsBtn?.addEventListener("click", openSettings);
   ui.settingsClose?.addEventListener("click", closeSettings);
 
+  bindUiSounds();
+
   // Safety: if asset loading stalls, reveal the menu anyway.
   setTimeout(revealMainMenu, 15000); // hard safety only for a true network stall
+}
+
+// Global UI sound delegation — every menu/HUD button gets a click voice, and
+// back/close buttons a softer "back" whoosh. In-game touch controls and the
+// hero/class pickers are excluded: the controls already trigger their own
+// ability sounds, and class selection plays its dedicated "class" chime.
+const UI_SOUND_EXCLUDE = ".mobile-btn, #attack-btn, .class-card, .class-button";
+const UI_SOUND_BACK = ".hero-back, #lb-back, #settings-close";
+
+function uiSoundForButton(btn) {
+  if (!btn || btn.closest(UI_SOUND_EXCLUDE)) return null;
+  if (btn.closest(UI_SOUND_BACK)) return "back";
+  return "click";
+}
+
+function bindUiSounds() {
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const btn = event.target?.closest?.("button");
+      const name = uiSoundForButton(btn);
+      if (name) playSound(name);
+    },
+    { capture: true }
+  );
+
+  // Subtle hover blip — mouse only, skip touch to avoid spam.
+  let lastHover = null;
+  document.addEventListener("pointerover", (event) => {
+    if (event.pointerType === "touch") return;
+    const btn = event.target?.closest?.("button");
+    if (btn === lastHover) return;
+    lastHover = btn;
+    if (btn && !btn.closest(UI_SOUND_EXCLUDE)) playSound("hover");
+  });
 }
 
 let settingsOpen = false;
