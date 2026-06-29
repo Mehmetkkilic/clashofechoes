@@ -232,6 +232,11 @@ const AUDIO_SAMPLES = {
   jump: { src: "/audio/jump.m4a", gain: 0.32, maxDuration: 0.4 },
   land: { src: "/audio/land.m4a", gain: 0.36, maxDuration: 0.4 },
   hurt: { src: "/audio/hurt.m4a", gain: 0.46, maxDuration: 0.55 },
+  // Per-class pain cries — picked by the local player's class via hurtSound().
+  "hurt-fighter": { src: "/audio/hurt-fighter.m4a", gain: 0.46, maxDuration: 0.6 },
+  "hurt-priest": { src: "/audio/hurt-priest.m4a", gain: 0.46, maxDuration: 0.6 },
+  "hurt-ranger": { src: "/audio/hurt-ranger.m4a", gain: 0.46, maxDuration: 0.6 },
+  "hurt-witch": { src: "/audio/hurt-witch.m4a", gain: 0.46, maxDuration: 0.6 },
   kill: { src: "/audio/kill.m4a", gain: 0.46, maxDuration: 0.7 },
   death: { src: "/audio/death.m4a", gain: 0.5, maxDuration: 1.0 },
   fire: { src: "/audio/fireball.m4a", gain: 0.46, maxDuration: 1.7 },
@@ -2223,6 +2228,12 @@ function projectAttackTarget(origin, direction, distance) {
   return new THREE.Vector3(origin.x, 0, origin.z).add(flat.normalize().multiplyScalar(distance));
 }
 
+// The local player's pain cry, chosen by class (falls back to the generic one).
+function hurtSound() {
+  const key = `hurt-${player.classId}`;
+  return AUDIO_SAMPLES[key] ? key : "hurt";
+}
+
 // Maps a remote player's attack label to a sound. Order matters: specific
 // ability names are checked before generic ones that they contain (e.g.
 // "Banshee Scream" before "Scream", "Arrow Rain" before "Arrow").
@@ -2266,7 +2277,7 @@ function applyPeerDamage(attackerId, hit = {}) {
     playSound("block");
     addFeed("Shield absorbed player hit", "Block");
   } else {
-    playSound("hurt");
+    playSound(hurtSound());
   }
 
   player.hp = Math.max(0, player.hp - finalDamage);
@@ -5164,7 +5175,7 @@ function damagePlayer(amount, enemy) {
     playSound("block");
     addFeed("Shield absorbed damage", "Block");
   } else {
-    playSound("hurt");
+    playSound(hurtSound());
   }
 
   player.hp -= finalDamage;
