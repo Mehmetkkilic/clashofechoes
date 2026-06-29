@@ -246,6 +246,16 @@ const AUDIO_SAMPLES = {
   "witch-silence": { src: "/audio/witch-silence.m4a", gain: 0.4, maxDuration: 1.1 },
   "witch-fear": { src: "/audio/witch-fear.m4a", gain: 0.42, maxDuration: 1.5 },
   "witch-banshee": { src: "/audio/witch-banshee.m4a", gain: 0.5, maxDuration: 2.6 },
+  // Class-specific ability SFX (ElevenLabs) — Fighter / Priest / Ranger.
+  "fighter-charge": { src: "/audio/fighter-charge.m4a", gain: 0.44, maxDuration: 0.8 },
+  "fighter-whirlwind": { src: "/audio/fighter-whirlwind.m4a", gain: 0.46, maxDuration: 1.6 },
+  "shield-up": { src: "/audio/shield-up.m4a", gain: 0.4, maxDuration: 0.6 },
+  "shield-down": { src: "/audio/shield-down.m4a", gain: 0.34, maxDuration: 0.5 },
+  "priest-firefield": { src: "/audio/priest-firefield.m4a", gain: 0.4, maxDuration: 1.4 },
+  "priest-icewall": { src: "/audio/priest-icewall.m4a", gain: 0.42, maxDuration: 1.2 },
+  "priest-meteor": { src: "/audio/priest-meteor.m4a", gain: 0.46, maxDuration: 1.8 },
+  "ranger-roll": { src: "/audio/ranger-roll.m4a", gain: 0.38, maxDuration: 0.6 },
+  "ranger-arrowrain": { src: "/audio/ranger-arrowrain.m4a", gain: 0.44, maxDuration: 1.6 },
   dash: { src: "/audio/magical-whoosh.m4a", gain: 0.44, playbackRate: 0.92, maxDuration: 0.8 },
   trap: { src: "/audio/trap.m4a", gain: 0.5, maxDuration: 1.0 },
   wall: { src: "/audio/magical-whoosh.m4a", gain: 0.42, playbackRate: 0.8, maxDuration: 1.0 },
@@ -2213,22 +2223,34 @@ function projectAttackTarget(origin, direction, distance) {
   return new THREE.Vector3(origin.x, 0, origin.z).add(flat.normalize().multiplyScalar(distance));
 }
 
+// Maps a remote player's attack label to a sound. Order matters: specific
+// ability names are checked before generic ones that they contain (e.g.
+// "Banshee Scream" before "Scream", "Arrow Rain" before "Arrow").
 function soundForAttack(label = "") {
-  if (label.includes("Arrow")) return "arrow";
-  if (label.includes("Fire") || label.includes("Meteor")) return "fire";
-  if (label.includes("Ice")) return "ice";
-  if (label.includes("Slash")) return "slash";
-  if (label.includes("Bash")) return "bash";
-  if (label.includes("Charge") || label.includes("Roll")) return "dash";
-  if (label.includes("Trap")) return "trap";
-  if (label.includes("Wall")) return "wall";
-  // Banshee must be checked before generic "Scream" since the label is "Banshee Scream".
+  // Witch
   if (label.includes("Banshee")) return "witch-banshee";
-  if (label.includes("Whirlwind") || label.includes("Rain")) return "ultimate";
   if (label.includes("Silence")) return "witch-silence";
   if (label.includes("Fear")) return "witch-fear";
   if (label.includes("Scream")) return "witch-scream";
   if (label.includes("Wave")) return "witch-soundwave";
+  // Fighter
+  if (label.includes("Whirlwind")) return "fighter-whirlwind";
+  if (label.includes("Sprint")) return "fighter-charge";
+  if (label.includes("Bash")) return "bash";
+  // Ranger (Arrow Rain before generic Arrow; Charged Arrow falls to "arrow")
+  if (label.includes("Arrow Rain")) return "ranger-arrowrain";
+  if (label.includes("Roll")) return "ranger-roll";
+  if (label.includes("Arrow")) return "arrow";
+  // Priest (Fire Field / Meteor / Ice Wall before generic Fire / Ice)
+  if (label.includes("Field")) return "priest-firefield";
+  if (label.includes("Meteor")) return "priest-meteor";
+  if (label.includes("Wall")) return "priest-icewall";
+  if (label.includes("Fire")) return "fire";
+  if (label.includes("Ice")) return "ice";
+  // Shared / fallback
+  if (label.includes("Slash")) return "slash";
+  if (label.includes("Charge")) return "dash";
+  if (label.includes("Trap")) return "trap";
   return "zone";
 }
 
@@ -4765,7 +4787,7 @@ function useFighterAbility(slot) {
 
   if (slot === "e") {
     cooldowns.e = 7.0;
-    playSound("dash");
+    playSound("fighter-charge");
     sendMultiplayerAttack("e", "Sprint Charge", 0xe0a34f);
     player.chargeRush = 0.72;
     player.chargeHits.clear();
@@ -4774,7 +4796,7 @@ function useFighterAbility(slot) {
 
   if (slot === "r") {
     cooldowns.r = 22;
-    playSound("ultimate");
+    playSound("fighter-whirlwind");
     sendMultiplayerAttack("r", "Whirlwind", 0xe0a34f);
     damageArea(player.position, 6.3, 76, "Whirlwind", 0xe0a34f, { knock: 10 });
     makeGroundRing(player.position, 6.3, 0xe0a34f, 0.7);
@@ -4785,7 +4807,7 @@ function useFighterAbility(slot) {
 function usePriestAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 6.5;
-    playSound("zone");
+    playSound("priest-firefield");
     const point = getAimGroundPoint(18);
     sendMultiplayerAttack("q", "Fire Field", 0xf26f45, { target: point });
     const mesh = makeGroundRing(point, 4.3, 0xf26f45, 4.2, true);
@@ -4805,7 +4827,7 @@ function usePriestAbility(slot) {
 
   if (slot === "e") {
     cooldowns.e = 8.0;
-    playSound("wall");
+    playSound("priest-icewall");
     const point = getAimGroundPoint(9);
     const forward = getFlatForward();
     sendMultiplayerAttack("e", "Ice Wall", 0x95d5ee, { target: point, direction: forward });
@@ -4829,7 +4851,7 @@ function usePriestAbility(slot) {
 
   if (slot === "r") {
     cooldowns.r = 24;
-    playSound("ultimate");
+    playSound("priest-meteor");
     const center = getAimGroundPoint(18);
     sendMultiplayerAttack("r", "Meteor Shower", 0xf26f45, { target: center });
     for (let i = 0; i < 9; i++) {
@@ -4847,7 +4869,7 @@ function usePriestAbility(slot) {
 function useRangerAbility(slot) {
   if (slot === "q") {
     cooldowns.q = 4.2;
-    playSound("dash");
+    playSound("ranger-roll");
     sendMultiplayerAttack("q", "Roll", 0x7fcf79);
     const right = getFlatRight();
     const forward = getFlatForward();
@@ -4897,7 +4919,7 @@ function useRangerAbility(slot) {
 
   if (slot === "r") {
     cooldowns.r = 21;
-    playSound("ultimate");
+    playSound("ranger-arrowrain");
     const center = getAimGroundPoint(17);
     sendMultiplayerAttack("r", "Arrow Rain", 0x7fcf79, { target: center });
     for (let i = 0; i < 14; i++) {
